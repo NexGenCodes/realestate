@@ -1,9 +1,7 @@
 import logging
-import requests
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
-import sms
 from .tasks import send_low_credit_alert_task
 from shared.cache_utils import get_key
 
@@ -53,25 +51,7 @@ def send_raw_email(subject, message, recipient_list, html_message=None):
         raise e
 
 
-def send_raw_sms(phone, message):
-    """Low-level wrapper for django-sms."""
-    try:
-        sms.send_sms(body=message, from_phone="REPro", to=[phone], fail_silently=False)
-        logger.info(f"SMS successfully sent to {phone}")
-        return True
-    except Exception as e:
-        logger.error(f"Raw SMS delivery failed: {str(e)}")
-        raise e
-
-
 # --- High-Level Notification Wrappers ---
-
-
-def get_base_context(extra_context=None):
-    context = {}
-    if extra_context:
-        context.update(extra_context)
-    return context
 
 
 def send_otp_email(email, otp_code):
@@ -140,46 +120,35 @@ def send_owner_approval_email(email, user_name):
     )
 
 
-def send_phone_otp_sms(phone, otp):
-    """Triggers phone OTP SMS via background task."""
-    from .tasks import send_sms_task
+def notify_admin_new_owner_request(user_name, user_email, id_type, reason):
+    """Notifies admin of a new owner request via email."""
+    from .tasks import send_email_task
 
-    message = f"Your Real Estate verification code is: {otp}. Valid for 15 minutes."
-    send_sms_task.delay(phone, message)
+    subject = f"New Owner Request: {user_name}"
+    message = f"""
+A new owner request has been submitted.
+
+User: {user_name}
+Email: {user_email}
+ID Type: {id_type}
+Reason: {reason}
+
+Please review this request in the admin panel.
+    """
+    logger.info(f"Admin notification triggered for owner request from {user_email}")
+    send_email_task.delay(
+        subject=subject,
+        message=message,
+        recipient_list=[settings.ADMIN_EMAIL],
+        html_message=None,
+    )
 
 
 # --- Monitoring & Alerts ---
 
 
-def check_messaging_credits():
-    """Checks balances and alerts admin if low."""
-
-    # SMS Check
-    sms_balance = None
-    try:
-        if settings.DEBUG:
-            api_token = settings.BULKSMSNIGERIA_API_TOKEN
-            if api_token and not api_token.startswith("your_"):
-                url = f"https://www.bulksmsnigeria.com/api/v1/user/balance?api_token={api_token}"
-                res = requests.get(url, timeout=5)
-                if res.status_code == 200:
-                    sms_balance = float(res.json().get("data", {}).get("balance", 0))
-        else:
-            api_key = settings.TERMII_API_KEY
-            if api_key and not api_key.startswith("your_"):
-                url = f"https://api.ng.termii.com/api/get-balance?api_key={api_key}"
-                res = requests.get(url, timeout=5)
-                if res.status_code == 200:
-                    sms_balance = float(res.json().get("balance", 0))
-
-        if sms_balance is not None and sms_balance < settings.SMS_LOW_CREDIT_THRESHOLD:
-            send_low_credit_alert_task.delay(
-                "SMS", sms_balance, settings.SMS_LOW_CREDIT_THRESHOLD
-            )
-    except Exception as e:
-        logger.error(f"Error checking SMS balance: {str(e)}")
-
-    # Email Check (Header-based from cache)
+def check_email_credits():
+    """Checks email balance and alerts admin if low."""
     email_usage = get_key("resend_usage_stats")
     if email_usage:
         remaining = email_usage.get("remaining", 0)
@@ -191,8 +160,7 @@ def check_messaging_credits():
                 f"{remaining}/{limit}",
                 settings.RESEND_LOW_CREDIT_THRESHOLD,
             )
-
-    return {"sms": sms_balance, "email": email_usage}
+    return {"email": email_usage}
 
 
 def alert_admin_low_credits(provider, balance, threshold):

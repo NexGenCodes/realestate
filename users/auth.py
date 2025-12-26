@@ -11,7 +11,7 @@ from shared.otp_utils import generate_otp
 from shared.messaging import (
     send_otp_email,
     send_welcome_email,
-    check_messaging_credits,
+    check_email_credits,
 )
 from .serializers import (
     SignupSerializer,
@@ -49,9 +49,7 @@ class SignupView(APIView):
             }
             # Cache for 15 minutes
             set_key(f"signup_{email}", cache_data, ttl=settings.CACHE_TTL)
-
-            # Check credits before proceeding (alerts admin if low)
-            check_messaging_credits()
+            check_email_credits()
 
             try:
                 # Strictly background to avoid blocking user response
@@ -146,8 +144,8 @@ class ResendOtpView(APIView):
             new_otp = generate_otp()
             cached_data["otp"] = new_otp
             set_key(cache_key, cached_data, ttl=settings.CACHE_TTL)
+            check_email_credits()
 
-            check_messaging_credits()
             try:
                 send_otp_email(email, new_otp)
                 logger.info(f"OTP successfully resent to {email}")
@@ -180,7 +178,7 @@ class ForgotPasswordView(APIView):
             if user:
                 otp_code = generate_otp()
                 set_key(f"reset_{email}", {"otp": otp_code}, ttl=settings.CACHE_TTL)
-                check_messaging_credits()
+                check_email_credits()
                 try:
                     send_otp_email(email, otp_code)
                     logger.info(f"Password reset OTP triggered for {email}")

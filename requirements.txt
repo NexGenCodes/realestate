@@ -12,7 +12,5 @@ Pillow>=10.2.0
 drf-yasg>=1.21.7
 django-cloudinary-storage>=0.3.0
 cloudinary>=1.38.0
-twilio>=8.10.0
 django-anymail[resend]>=11.1
 requests>=2.31.0
-django-sms>=0.6.0

@@ -18,7 +18,6 @@ class APIIntegrationTests(APITestCase):
         self.login_url = reverse("token_obtain_pair")
         self.profile_url = reverse("profile")
         self.owner_request_url = reverse("owner-requests")
-        self.owner_verify_url = reverse("owner-requests-verify")
 
         self.signup_data = {
             "email": "testuser@example.com",
@@ -62,8 +61,8 @@ class APIIntegrationTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["username"], "testuser")
 
-    @patch("users.views.send_phone_otp_sms")
-    def test_owner_request_to_approval_flow(self, mock_send_sms):
+    @patch("users.views.notify_admin_new_owner_request")
+    def test_owner_request_to_approval_flow(self, mock_notify_admin):
         """Test the flow from owner request submission to admin approval."""
         # Setup: Create and verify a user
         user = User.objects.create_user(
@@ -75,10 +74,6 @@ class APIIntegrationTests(APITestCase):
         self.client.force_authenticate(user=user)
 
         # 1. Submit Owner Request
-        # Note: In real scenarios, a file would be uploaded. Cloudinary is mocked in settings or by virtue of not hitting real network.
-        # However, for tests, we should mock the Cloudinary upload if possible or assume URL persistence works.
-        # Since we use serializers that call cloudinary.uploader.upload, we should patch it.
-
         with patch("cloudinary.uploader.upload") as mock_upload:
             mock_upload.return_value = {
                 "secure_url": "https://res.cloudinary.com/test/doc.pdf"
@@ -92,27 +87,18 @@ class APIIntegrationTests(APITestCase):
             )
 
             request_data = {
-                "phone_number": "+2348000000000",
+                "id_type": "NATIONAL_ID",
+                "reason": "I want to list my luxury apartments.",
                 "documents": doc_file,
-                "business_name": "Test Real Estate",
-                "business_address": "123 Street",
             }
             response = self.client.post(
                 self.owner_request_url, request_data, format="multipart"
             )
             self.assertEqual(response.status_code, status.HTTP_201_CREATED)
             request_id = response.data["id"]
+            self.assertTrue(mock_notify_admin.called)
 
-            # 2. Verify Phone OTP
-            otp_key = f"owner_otp_{request_id}"
-            cached_data = cache.get(otp_key)
-            otp = cached_data["otp"]
-
-            verify_data = {"request_id": request_id, "otp_code": otp}
-            response = self.client.post(self.owner_verify_url, verify_data)
-            self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-            # 3. Admin Approval
+            # 2. Admin Approval
             admin = User.objects.create_superuser(
                 username="admin", email="admin@test.com", password="adminpassword"
             )

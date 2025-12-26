@@ -4,8 +4,6 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .views import (
     ProfileView,
     OwnerRequestView,
-    OwnerRequestVerifyView,
-    OwnerRequestResendView,
     AdminUserViewSet,
     AdminOwnerRequestViewSet,
 )
@@ -33,15 +31,5 @@ urlpatterns = [
     path("auth/reset-password/", ResetPasswordView.as_view(), name="reset-password"),
     path("profile/", ProfileView.as_view(), name="profile"),
     path("owner-requests/", OwnerRequestView.as_view(), name="owner-requests"),
-    path(
-        "owner-requests/verify/",
-        OwnerRequestVerifyView.as_view(),
-        name="owner-requests-verify",
-    ),
-    path(
-        "owner-requests/resend/",
-        OwnerRequestResendView.as_view(),
-        name="owner-requests-resend",
-    ),
     path("", include(router.urls)),
 ]

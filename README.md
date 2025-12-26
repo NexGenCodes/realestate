@@ -4,7 +4,7 @@ A robust, production-ready backend for a Real Estate platform, built with Django
 
 ## 🚀 Features
 
-- **Unified Messaging**: Centralized hub for Email (Resend) and SMS (BulkSMSNigeria/Termii).
+- **Unified Messaging**: Centralized hub for Email (Resend) notifications.
 - **Cloudinary Storage**: Optimized media storage for profile pictures and documents.
 - **Literal URL Persistence**: Direct absolute URLs stored in the database for instant frontend access.
 - **Robust Auth**: OTP-based signup, password reset, and secure JWT-based session management.
@@ -15,7 +15,7 @@ A robust, production-ready backend for a Real Estate platform, built with Django
 
 - **Framework**: Django 5.x & Django REST Framework
 - **Storage**: Cloudinary (via `django-cloudinary-storage`)
-- **Messaging**: Anymail (Resend), Termii, BulkSMSNigeria
+- **Messaging**: Anymail (Resend)
 - **Task Queue**: Celery & Redis
 - **Security**: JWT (SimpleJWT), OTP, Atomic Transactions
 - **Documentation**: Swagger/OpenAPI (drf-yasg)
@@ -49,8 +49,6 @@ The API is fully documented using Swagger and Redoc.
 | Endpoint | Method | Description |
 | :--- | :--- | :--- |
 | `/api/v1/users/owner-requests/` | `GET`, `POST` | List or submit ownership verification requests. |
-| `/api/v1/users/owner-requests/verify/` | `POST` | Verify phone number via SMS OTP. |
-| `/api/v1/users/owner-requests/resend/` | `POST` | Resend SMS OTP for owner request. |
 
 ### Admin Operations
 | Endpoint | Method | Description |

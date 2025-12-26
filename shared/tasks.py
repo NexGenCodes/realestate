@@ -16,17 +16,6 @@ def send_email_task(subject, message, recipient_list, html_message=None):
 
 
 @shared_task
-def send_sms_task(phone, message):
-    """Background task to send SMS via messaging hub."""
-    from .messaging import send_raw_sms
-
-    logger.info(f"Starting send_sms_task for: {phone}")
-    result = send_raw_sms(phone, message)
-    logger.info(f"Finished send_sms_task for: {phone}. Result: {result}")
-    return result
-
-
-@shared_task
 def send_low_credit_alert_task(provider, balance, threshold):
     """Background task for low credit alerts."""
     from .messaging import alert_admin_low_credits

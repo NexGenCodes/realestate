@@ -54,7 +54,6 @@ INSTALLED_APPS = [
     "drf_yasg",
     "cloudinary",
     "cloudinary_storage",
-    "sms",
     # Local
     "properties",
     "users",
@@ -272,18 +271,8 @@ if CLOUDINARY_STORAGE["CLOUD_NAME"]:
 else:
     DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
 
-# BulkSMSNigeria & Termii Settings
-BULKSMSNIGERIA_API_TOKEN = env("BULKSMSNIGERIA_API_TOKEN", default=None)
-TERMII_API_KEY = env("TERMII_API_KEY", default=None)
 
-# django-sms Configuration
-SMS_BACKEND = (
-    "shared.sms_backends.BulkSMSNigeriaBackend"
-    if DEBUG
-    else "shared.sms_backends.TermiiBackend"
-)
-
-SMS_LOW_CREDIT_THRESHOLD = env.float("SMS_LOW_CREDIT_THRESHOLD", default=100.0)  # NGN
+# Email Credit Monitoring
 RESEND_LOW_CREDIT_THRESHOLD = env.int(
     "RESEND_LOW_CREDIT_THRESHOLD", default=10
 )  # monthly remaining

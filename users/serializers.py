@@ -91,18 +91,17 @@ class OwnerRequestSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "user",
+            "id_type",
             "documents",
             "documents_url",
-            "phone_number",
+            "reason",
             "status",
-            "is_phone_verified",
             "is_verified",
             "created_at",
         )
         read_only_fields = (
             "user",
             "status",
-            "is_phone_verified",
             "is_verified",
             "created_at",
             "documents_url",
@@ -147,15 +146,6 @@ class OwnerRequestSerializer(serializers.ModelSerializer):
         return instance
 
 
-class OwnerRequestVerifySerializer(serializers.Serializer):
-    request_id = serializers.IntegerField()
-    otp_code = serializers.CharField(max_length=6)
-
-
-class OwnerRequestResendSerializer(serializers.Serializer):
-    request_id = serializers.IntegerField()
-
-
 class AdminOwnerRequestSerializer(serializers.ModelSerializer):
     user_username = serializers.CharField(source="user.username", read_only=True)
 
@@ -165,17 +155,15 @@ class AdminOwnerRequestSerializer(serializers.ModelSerializer):
             "id",
             "user",
             "user_username",
+            "id_type",
             "documents_url",
-            "phone_number",
+            "reason",
             "status",
-            "is_phone_verified",
             "is_verified",
             "created_at",
         )
         read_only_fields = (
             "user",
-            "phone_number",
-            "is_phone_verified",
             "is_verified",
             "created_at",
             "documents_url",

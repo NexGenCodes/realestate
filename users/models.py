@@ -44,12 +44,22 @@ class OwnerRequest(models.Model):
         APPROVED = "APPROVED", _("Approved")
         REJECTED = "REJECTED", _("Rejected")
 
+    class IdType(models.TextChoices):
+        DRIVERS_LICENSE = "DRIVERS_LICENSE", _("Driver's License")
+        NATIONAL_ID = "NATIONAL_ID", _("National ID")
+        PASSPORT = "PASSPORT", _("Passport")
+        VOTERS_CARD = "VOTERS_CARD", _("Voter's Card")
+
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="owner_requests"
     )
+    id_type = models.CharField(
+        max_length=20, choices=IdType.choices, default=IdType.NATIONAL_ID
+    )
     documents_url = models.URLField(max_length=500, null=True, blank=True)
-    phone_number = models.CharField(max_length=20, null=True, blank=True)
-    is_phone_verified = models.BooleanField(default=False)
+    reason = models.TextField(
+        help_text="Reason for requesting owner status", default=""
+    )
     status = models.CharField(
         max_length=10, choices=Status.choices, default=Status.PENDING
     )
