@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            background: #10B981;
+            padding: 20px;
+            text-align: center;
+            color: #ffffff;
+        }
+
+        .content {
+            padding: 30px;
+            color: #333333;
+            line-height: 1.6;
+        }
+
+        .footer {
+            background: #f9fafb;
+            padding: 15px;
+            text-align: center;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .button {
+            display: inline-block;
+            background: #10B981;
+            color: #ffffff;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Request Approved!</h1>
+        </div>
+        <div class="content">
+            <h2>Hello {{ user_name }},</h2>
+            <p>Great news! Your request to become a property owner has been <strong>approved</strong>.</p>
+            <p>You now have access to list and manage properties on our platform.</p>
+            <p style="text-align: center;">
+                <a href="{{ login_url }}" class="button">Go to Dashboard</a>
+            </p>
+        </div>
+        <div class="footer">
+            &copy; 2025 Real Estate App. All rights reserved.
+        </div>
+    </div>
+</body>
+
+</html>
