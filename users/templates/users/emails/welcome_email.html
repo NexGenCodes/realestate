@@ -1,32 +1,15 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f6f6f6; margin: 0; padding: 0; }
-        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); }
-        .header { text-align: center; padding-bottom: 20px; border-bottom: 1px solid #eeeeee; }
-        .header h1 { color: #27ae60; }
-        .content { padding: 30px 0; text-align: center; }
-        .button { background-color: #27ae60; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; }
-        .footer { text-align: center; color: #999999; font-size: 12px; padding-top: 20px; border-top: 1px solid #eeeeee; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Welcome Aboard!</h1>
-        </div>
-        <div class="content">
-            <p>Hi {{ first_name }},</p>
-            <p>Your account has been successfully created. We are excited to have you with us.</p>
-            <br>
-            <p>Explore usage of our platform to find your dream property or list one!</p>
-            <br>
-            <a href="#" class="button">Get Started</a>
-        </div>
-        <div class="footer">
-            <p>&copy; 2025 Real Estate App. All rights reserved.</p>
-        </div>
-    </div>
-</body>
-</html>
+{% extends "shared/email_base.html" %}
+
+{% block content %}
+<h2>Welcome to Real Estate Pro!</h2>
+<p>Hello {{ user_name }},</p>
+<p>We're thrilled to have you join our community. Real Estate Pro makes finding and managing properties easier than ever
+    before.</p>
+
+<p>You can now start exploring available properties or list your own if you've been approved as an owner.</p>
+
+<a href="{{ login_url }}" class="button">Log In to Your Account</a>
+
+<p>If you have any questions, simply reply to this email. We're here to help!</p>
+<p>Best regards,<br>The Real Estate Pro Team</p>
+{% endblock %}
