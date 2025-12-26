@@ -58,7 +58,7 @@ class SignupView(APIView):
                 send_otp_email(email, otp_code)
                 logger.info(f"Signup OTP successfully triggered for {email}")
                 return Response(
-                    {"message": "OTP sent to email."}, status=status.HTTP_200_OK
+                    {"message": "OTP sent to email."}, status=status.HTTP_201_CREATED
                 )
             except Exception as e:
                 logger.error(f"Error triggering signup OTP for {email}: {str(e)}")

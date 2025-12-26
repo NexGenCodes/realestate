@@ -33,6 +33,9 @@ class ProfileView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = UserSerializer
 
+    def get_object(self):
+        return self.request.user
+
     @swagger_auto_schema(
         operation_summary="Get/Update User Profile",
         operation_description="Retrieve or update the authenticated user's profile information.",
