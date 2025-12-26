@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.gis",
     # Third party
     "rest_framework",
     "rest_framework_simplejwt",
@@ -93,7 +94,10 @@ WSGI_APPLICATION = "config.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {"default": env.db()}
+DATABASES = {
+    "default": env.db(default="postgis://postgres:postgres@db:5432/realestate_db")
+}
+DATABASES["default"]["ENGINE"] = "django.contrib.gis.db.backends.postgis"
 
 
 # Password validation
@@ -158,8 +162,8 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.ScopedRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "500/day",
-        "user": "5000/day",
+        "anon": "200/hour",
+        "user": "1000/hour",
         "otp_request": "5/minute",
         "login_attempt": "10/minute",
     },

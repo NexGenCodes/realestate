@@ -18,6 +18,7 @@ class SignupSerializer(serializers.ModelSerializer):
 
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():
+            logger.info(f"Signup validation failed: Email {value} already exists.")
             raise serializers.ValidationError("A user with this email already exists.")
         return value
 
@@ -180,3 +181,7 @@ class ResetPasswordSerializer(serializers.Serializer):
     new_password = serializers.CharField(
         write_only=True, validators=[validate_password]
     )
+
+    def validate(self, data):
+        # We can add a log here if needed, but the view usually handles the logic
+        return data

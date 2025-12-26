@@ -144,6 +144,21 @@ Please review this request in the admin panel.
     )
 
 
+def notify_owner_property_status_change(email, property_title, new_status):
+    """Notifies property owner of a status change (Rented/Sold)."""
+    from .tasks import send_email_task
+
+    subject = f"Property Status Update: {property_title}"
+    message = f"Congratulations! Your property '{property_title}' has been successfully marked as {new_status}."
+
+    send_email_task.delay(
+        subject=subject,
+        message=message,
+        recipient_list=[email],
+        html_message=None,  # Simplified for status update, can be themed later
+    )
+
+
 # --- Monitoring & Alerts ---
 
 

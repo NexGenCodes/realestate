@@ -18,12 +18,12 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
-
-from properties.views import HealthCheckView
-
 from rest_framework import permissions
+from rest_framework.routers import DefaultRouter
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
+
+from properties.views import HealthCheckView, FavoriteViewSet
 
 schema_view = get_schema_view(
     openapi.Info(
@@ -38,9 +38,15 @@ schema_view = get_schema_view(
     permission_classes=(permissions.AllowAny,),
 )
 
+# Router for favorites at root level
+favorites_router = DefaultRouter()
+favorites_router.register(r"favorites", FavoriteViewSet, basename="favorite")
+
 urlpatterns = [
+    path("api/health-check/", HealthCheckView.as_view(), name="health-check"),
     path("admin/", admin.site.urls),
-    path("api/v1/properties/", include("properties.urls")),
+    path("api/v1/", include("properties.urls")),
+    path("api/v1/", include(favorites_router.urls)),
     path("api/v1/users/", include("users.urls")),
     # Documentation
     path(
