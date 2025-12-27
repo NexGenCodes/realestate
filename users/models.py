@@ -2,6 +2,7 @@ import logging
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.utils.translation import gettext_lazy as _
+from .managers import CustomUserManager
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ class User(AbstractUser):
         FEMALE = "FEMALE", _("Female")
         OTHER = "OTHER", _("Other")
 
+    username = None  # Removed username field
     role = models.CharField(max_length=10, choices=Role.choices, default=Role.USER)
     profile_picture_url = models.URLField(max_length=500, null=True, blank=True)
     country = models.CharField(max_length=100, null=True, blank=True)
@@ -25,16 +27,22 @@ class User(AbstractUser):
     )
     phone_number = models.CharField(max_length=20, null=True, blank=True)
     bio = models.TextField(null=True, blank=True)
+    is_verified_owner = models.BooleanField(default=False)
 
     # Overriding to make email unique
     email = models.EmailField(_("email address"), unique=True)
 
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = []
+
+    objects = CustomUserManager()
+
     def __str__(self):
-        return self.username
+        return self.email
 
     def save(self, *args, **kwargs):
         if not self.id:
-            logger.info(f"Creating new user: {self.username}")
+            logger.info(f"Creating new user: {self.email}")
         super().save(*args, **kwargs)
 
 
@@ -68,9 +76,51 @@ class OwnerRequest(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.user.username} - {self.status}"
+        return f"{self.user.email} - {self.status}"
 
     def save(self, *args, **kwargs):
         if not self.id:
-            logger.info(f"New owner request submitted by user: {self.user.username}")
+            logger.info(f"New owner request submitted by user: {self.user.email}")
         super().save(*args, **kwargs)
+
+
+class SavedSearch(models.Model):
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="saved_searches"
+    )
+    name = models.CharField(max_length=100)
+    filters = models.JSONField(default=dict)
+    notification_enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.user.email})"
+
+
+class DeviceToken(models.Model):
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="device_tokens"
+    )
+    token = models.CharField(max_length=255, unique=True)
+    platform = models.CharField(max_length=20)  # e.g., ios, android, web
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.email} - {self.platform}"
+
+
+class Notification(models.Model):
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="notifications"
+    )
+    title = models.CharField(max_length=255)
+    body = models.TextField()
+    data = models.JSONField(default=dict, blank=True)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Notification for {self.user.email}: {self.title}"

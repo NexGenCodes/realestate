@@ -13,6 +13,7 @@ drf-yasg>=1.21.7
 django-cloudinary-storage>=0.3.0
 cloudinary>=1.38.0
 django-anymail[resend]>=11.1
-requests>=2.31.0
 djangorestframework-gis>=1.0
 django-filter>=23.5
+pytest
+pytest-django

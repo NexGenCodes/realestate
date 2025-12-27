@@ -45,7 +45,7 @@ favorites_router.register(r"favorites", FavoriteViewSet, basename="favorite")
 urlpatterns = [
     path("api/health-check/", HealthCheckView.as_view(), name="health-check"),
     path("admin/", admin.site.urls),
-    path("api/v1/", include("properties.urls")),
+    path("api/v1/properties/", include("properties.urls")),
     path("api/v1/", include(favorites_router.urls)),
     path("api/v1/users/", include("users.urls")),
     # Documentation

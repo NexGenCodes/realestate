@@ -3,6 +3,7 @@ from django.db import transaction
 from django.contrib.auth import get_user_model
 from django.conf import settings
 from rest_framework import status, permissions
+from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_yasg.utils import swagger_auto_schema
@@ -107,7 +108,7 @@ class VerifySignupView(APIView):
 
             delete_key(cache_key)
             send_welcome_email(user.email, user.first_name)
-            logger.info(f"User {user.username} verified and created successfully.")
+            logger.info(f"User {user.email} verified and created successfully.")
 
             return Response(
                 {"message": "Account created successfully."},
@@ -231,3 +232,18 @@ class ResetPasswordView(APIView):
             f"Password reset attempt failed for {request.data.get('email', 'unknown')}"
         )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    throttle_scope = "login_attempt"
+
+    def post(self, request, *args, **kwargs):
+        email = request.data.get("email", "unknown")
+        try:
+            response = super().post(request, *args, **kwargs)
+            if response.status_code == 200:
+                logger.info(f"Successful login for user: {email}")
+            return response
+        except Exception as e:
+            logger.warning(f"Failed login attempt for user: {email}. Error: {str(e)}")
+            raise e

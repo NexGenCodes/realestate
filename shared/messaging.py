@@ -144,6 +144,75 @@ Please review this request in the admin panel.
     )
 
 
+def notify_owner_new_tour_request(owner_email, property_title, requester_email, slot):
+    """Notifies property owner of a new tour request via email and in-app notification."""
+    from .tasks import send_email_task
+    from users.models import Notification, User
+
+    subject = f"New Tour Request: {property_title}"
+    message = f"""
+Hello,
+
+You have a new tour request for your property: {property_title}.
+
+Requester: {requester_email}
+Requested Slot: {slot}
+
+Please log in to your dashboard to approve or reject this request.
+    """
+
+    # Send Email
+    send_email_task.delay(
+        subject=subject,
+        message=message,
+        recipient_list=[owner_email],
+        html_message=None,
+    )
+
+    # In-App Notification
+    try:
+        user = User.objects.get(email=owner_email)
+        Notification.objects.create(
+            user=user,
+            title="New Tour Request",
+            body=f"{requester_email} wants to tour '{property_title}' at {slot}.",
+            data={"type": "tour_request"},
+        )
+    except User.DoesNotExist:
+        logger.error(f"Could not create notification: User {owner_email} not found.")
+
+
+def notify_user_owner_request_status(user_email, status, reason=None):
+    """Notifies user when their owner request is approved or rejected."""
+    from .tasks import send_email_task
+    from users.models import Notification, User
+
+    subject = f"Owner Request {status.capitalize()}"
+    body_text = f"Your request to become a property owner has been {status}."
+    if reason:
+        body_text += f"\nReason: {reason}"
+
+    # Send Email
+    send_email_task.delay(
+        subject=subject,
+        message=body_text,
+        recipient_list=[user_email],
+        html_message=None,
+    )
+
+    # In-App Notification
+    try:
+        user = User.objects.get(email=user_email)
+        Notification.objects.create(
+            user=user,
+            title=f"Owner Request {status.capitalize()}",
+            body=body_text,
+            data={"type": "owner_request_update", "status": status},
+        )
+    except User.DoesNotExist:
+        logger.error(f"Could not create notification: User {user_email} not found.")
+
+
 def notify_owner_property_status_change(email, property_title, new_status):
     """Notifies property owner of a status change (Rented/Sold)."""
     from .tasks import send_email_task

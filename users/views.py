@@ -1,19 +1,24 @@
 import logging
 from django.db import transaction
-from rest_framework import generics, viewsets, permissions
+from rest_framework import generics, viewsets, permissions, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from django.contrib.auth import get_user_model
 from shared.messaging import (
-    send_owner_approval_email,
     notify_admin_new_owner_request,
     check_email_credits,
+    notify_user_owner_request_status,
 )
 from drf_yasg.utils import swagger_auto_schema
 from .serializers import (
     UserSerializer,
     OwnerRequestSerializer,
     AdminOwnerRequestSerializer,
+    SavedSearchSerializer,
+    DeviceTokenSerializer,
+    NotificationSerializer,
 )
-from .models import OwnerRequest
+from .models import OwnerRequest, SavedSearch, DeviceToken, Notification
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +59,9 @@ class ProfileView(generics.RetrieveUpdateDestroyAPIView):
     @transaction.atomic
     def perform_update(self, serializer):
         user = self.request.user
-        logger.info(f"User {user.username} is updating their profile.")
+        logger.info(f"[PROFILE] User {user.email} is updating their profile.")
         serializer.save()
-        logger.info(f"Profile update successful for user {user.username}")
+        logger.info(f"[PROFILE] Profile update successful for user {user.email}")
 
 
 class OwnerRequestView(generics.ListCreateAPIView):
@@ -114,19 +119,21 @@ class AdminOwnerRequestViewSet(viewsets.ModelViewSet):
         instance = serializer.save()
         if instance.status == OwnerRequest.Status.APPROVED:
             instance.user.role = User.Role.OWNER
+            instance.user.is_verified_owner = True
             instance.user.save()
             instance.is_verified = True
             instance.save()
-            # Email can be async as it's not blocking the critical flow for the admin
-            try:
-                send_owner_approval_email(instance.user.email, instance.user.first_name)
-                logger.info(
-                    f"Admin approved OwnerRequest {instance.id} for user {instance.user.username}. Approval email triggered."
-                )
-            except Exception as e:
-                logger.error(
-                    f"Failed to trigger approval email for {instance.user.email}: {str(e)}"
-                )
+            notify_user_owner_request_status(instance.user.email, "APPROVED")
+            logger.info(
+                f"[OWNER_REQUEST] Admin {self.request.user.email} APPROVED request for {instance.user.email}"
+            )
+        elif instance.status == OwnerRequest.Status.REJECTED:
+            notify_user_owner_request_status(
+                instance.user.email, "REJECTED", reason=instance.admin_notes
+            )
+            logger.info(
+                f"[OWNER_REQUEST] Admin {self.request.user.email} REJECTED request for {instance.user.email}"
+            )
 
 
 @swagger_auto_schema(
@@ -138,3 +145,59 @@ class AdminUserViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAdminUser]
     queryset = User.objects.all()
     serializer_class = UserSerializer
+
+
+class SavedSearchViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing user's saved searches."""
+
+    serializer_class = SavedSearchSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        if (
+            getattr(self, "swagger_fake_view", False)
+            or not self.request.user.is_authenticated
+        ):
+            return SavedSearch.objects.none()
+        return SavedSearch.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+        logger.info(f"User {self.request.user.email} saved a new search.")
+
+
+class DeviceTokenViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing user device tokens for push notifications."""
+
+    serializer_class = DeviceTokenSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return DeviceToken.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+
+class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for managing user notifications."""
+
+    serializer_class = NotificationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Notification.objects.filter(user=self.request.user)
+
+    @action(detail=True, methods=["post"])
+    def mark_as_read(self, request, pk=None):
+        notification = self.get_object()
+        notification.is_read = True
+        notification.save()
+        return Response({"status": "notification marked as read"})
+
+    @action(detail=False, methods=["post"])
+    def mark_all_as_read(self, request):
+        Notification.objects.filter(user=request.user, is_read=False).update(
+            is_read=True
+        )
+        return Response({"status": "all notifications marked as read"})

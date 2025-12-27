@@ -3,7 +3,7 @@ import cloudinary.uploader
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
-from .models import OwnerRequest
+from .models import OwnerRequest, SavedSearch, DeviceToken, Notification
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -14,7 +14,7 @@ class SignupSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ("username", "email", "first_name", "last_name", "password")
+        fields = ("email", "first_name", "last_name", "password")
 
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():
@@ -39,7 +39,6 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = (
             "id",
-            "username",
             "email",
             "first_name",
             "last_name",
@@ -50,8 +49,9 @@ class UserSerializer(serializers.ModelSerializer):
             "gender",
             "phone_number",
             "bio",
+            "is_verified_owner",
         )
-        read_only_fields = ("role", "profile_picture_url")
+        read_only_fields = ("role", "profile_picture_url", "is_verified_owner")
 
     def validate_profile_picture(self, value):
         if value:
@@ -67,7 +67,7 @@ class UserSerializer(serializers.ModelSerializer):
         profile_picture = validated_data.pop("profile_picture", None)
         if profile_picture:
             try:
-                logger.info(f"Uploading profile picture for user {instance.username}")
+                logger.info(f"Uploading profile picture for user {instance.email}")
                 upload_result = cloudinary.uploader.upload(
                     profile_picture, folder="profile_pics/"
                 )
@@ -76,9 +76,7 @@ class UserSerializer(serializers.ModelSerializer):
                     f"Cloudinary upload success: {instance.profile_picture_url}"
                 )
             except Exception as e:
-                logger.error(
-                    f"Cloudinary upload failed for {instance.username}: {str(e)}"
-                )
+                logger.error(f"Cloudinary upload failed for {instance.email}: {str(e)}")
                 raise serializers.ValidationError("Failed to upload image.")
 
         return super().update(instance, validated_data)
@@ -133,7 +131,7 @@ class OwnerRequestSerializer(serializers.ModelSerializer):
             try:
                 # We need the user from context for logging
                 user = self.context["request"].user
-                logger.info(f"Uploading owner documents for user {user.username}")
+                logger.info(f"Uploading owner documents for user {user.email}")
                 upload_result = cloudinary.uploader.upload(
                     documents, folder="owner_documents/", resource_type="auto"
                 )
@@ -148,14 +146,14 @@ class OwnerRequestSerializer(serializers.ModelSerializer):
 
 
 class AdminOwnerRequestSerializer(serializers.ModelSerializer):
-    user_username = serializers.CharField(source="user.username", read_only=True)
+    user_email = serializers.CharField(source="user.email", read_only=True)
 
     class Meta:
         model = OwnerRequest
         fields = (
             "id",
             "user",
-            "user_username",
+            "user_email",
             "id_type",
             "documents_url",
             "reason",
@@ -185,3 +183,24 @@ class ResetPasswordSerializer(serializers.Serializer):
     def validate(self, data):
         # We can add a log here if needed, but the view usually handles the logic
         return data
+
+
+class SavedSearchSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SavedSearch
+        fields = ["id", "name", "filters", "notification_enabled", "created_at"]
+        read_only_fields = ["created_at"]
+
+
+class DeviceTokenSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DeviceToken
+        fields = ["id", "token", "platform", "created_at"]
+        read_only_fields = ["created_at"]
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = ["id", "title", "body", "data", "is_read", "created_at"]
+        read_only_fields = ["id", "created_at"]
