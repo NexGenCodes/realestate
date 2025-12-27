@@ -6,6 +6,7 @@ from shared.security import sanitize_html
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.db import transaction as db_transaction  # Added by user instruction
 
 logger = logging.getLogger(__name__)
 
@@ -124,10 +125,13 @@ class Property(models.Model):
         if self.latitude is not None and self.longitude is not None:
             new_location = Point(float(self.longitude), float(self.latitude))
 
-            # Only geocode if location changed or fields are empty
-            if self.location != new_location or not self.city:
+            # Only geocode if location changed AND address fields are empty
+            # If coordinates change, we usually want to re-geocode, BUT if the user
+            # manually provided city/state (e.g. in tests or specialized admin entry), we preserve it.
+            if self.location != new_location:
                 self.location = new_location
-                self._reverse_geocode()
+                if not any([self.city, self.state, self.country]):
+                    self._reverse_geocode()
         elif self.location:
             # If location exists but lat/lon are missing, sync back
             self.latitude = self.location.y

@@ -6,7 +6,6 @@ from rest_framework.response import Response
 from django.contrib.auth import get_user_model
 from shared.messaging import (
     notify_admin_new_owner_request,
-    check_email_credits,
     notify_user_owner_request_status,
 )
 from drf_yasg.utils import swagger_auto_schema

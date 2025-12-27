@@ -5,6 +5,7 @@ import json
 from django.conf import settings
 from django.db import transaction as db_transaction
 from django.utils import timezone
+from django.db import models
 from .models import (
     PaymentProfile,
     Transaction,
@@ -27,27 +28,31 @@ class FlutterwaveService:
     }
 
     @staticmethod
+    def _get_payment_options(amount):
+        """Helper to determine payment options based on amount."""
+        if amount > 1000000:
+            return "banktransfer"
+        return "card,banktransfer,ussd,account"
+
+    @staticmethod
     def generate_payment_config(transaction_obj):
         """
         Generate configuration for Frontend Widget / Mobile SDK.
         Does NOT call FLW API. Returns payload for frontend to use.
         """
-        # High Value Logic (Frontend should enforce, but we signal it)
-        payment_options = "card,banktransfer,ussd,account"
-        if transaction_obj.amount > 1000000:
-            payment_options = "banktransfer"
+        payment_options = FlutterwaveService._get_payment_options(
+            transaction_obj.amount
+        )
 
         return {
-            "public_key": settings.FLW_PUBLIC_KEY,  # Ensure this is in settings
+            "public_key": settings.FLW_PUBLIC_KEY,
             "tx_ref": transaction_obj.flw_ref,
             "amount": float(transaction_obj.amount),
             "currency": "NGN",
             "payment_options": payment_options,
             "customer": {
                 "email": transaction_obj.payer.email,
-                "phonenumber": getattr(
-                    transaction_obj.payer, "phone_number", ""
-                ),  # Handle optional phone
+                "phonenumber": getattr(transaction_obj.payer, "phone_number", ""),
                 "name": f"{transaction_obj.payer.first_name} {transaction_obj.payer.last_name}",
             },
             "meta": {
@@ -64,18 +69,16 @@ class FlutterwaveService:
 
     @staticmethod
     def initiate_payment(transaction_obj):
-        """Initialize payment with Flutterwave."""
-
-        # High Value Logic
-        payment_options = "card,banktransfer,ussd,account"
-        if transaction_obj.amount > 1000000:
-            payment_options = "banktransfer"  # Force bank transfer for > 1m
+        """Initialize payment with Flutterwave (Direct API integration)."""
+        payment_options = FlutterwaveService._get_payment_options(
+            transaction_obj.amount
+        )
 
         payload = {
             "tx_ref": transaction_obj.flw_ref,
             "amount": str(transaction_obj.amount),
             "currency": "NGN",
-            "redirect_url": f"{settings.SITE_URL}/api/payments/callback/",  # Or frontend URL
+            "redirect_url": f"{settings.SITE_URL}/api/payments/callback/",
             "payment_options": payment_options,
             "customer": {
                 "email": transaction_obj.payer.email,
@@ -248,7 +251,7 @@ class PaymentService:
                 old_status=old_status,
                 new_status=tx.status,
                 changed_by=None,  # System
-                ip_address="WEBHOOK",
+                ip_address="127.0.0.1",
             )
 
             # Logic: We hold funds. We do NOT credit PaymentProfile yet.
@@ -461,11 +464,6 @@ class PaymentService:
                 withdrawal.save()
                 raise e
 
-            except Exception as e:
-                withdrawal.status = WithdrawalRequest.Status.FAILED
-                withdrawal.save()
-                raise e
-
     @staticmethod
     def cancel_transaction(transaction, reason, account_details):
         """
@@ -522,7 +520,7 @@ class PaymentService:
                 transaction=tx,
                 old_status=old_status,
                 new_status=tx.status,
-                ip_address="USER_CANCEL",
+                ip_address="127.0.0.1",
             )
 
             # Ban Logic Check

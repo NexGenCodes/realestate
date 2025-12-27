@@ -369,3 +369,110 @@ class TestSecurityAndRobustness:
         res = client.post(view, {"title": "Fast", "latitude": 0.0, "longitude": 0.0})
         # If it returns 201 or 400, it means it passed the throttle layer.
         assert res.status_code in [201, 400]
+
+
+@pytest.mark.django_db
+class TestGISAndGeocoding:
+    """Tests for PostGIS spatial filtering and Reverse Geocoding."""
+
+    def test_spatial_proximity_search(self, verified_owner):
+        """Test the ?dist=&lat=&lon= filter using PostGIS."""
+        user, client = verified_owner
+
+        # 1. Create a property in Lagos (Ikeja area)
+        # Lat: 6.601, Lon: 3.351
+        p1 = Property.objects.create(
+            owner=user,
+            title="Ikeja Apartment",
+            price=1000,
+            latitude=6.601,
+            longitude=3.351,
+            category="APARTMENT",
+        )
+
+        # 2. Query within 5km of Ikeja center (6.6, 3.35)
+        # Should find p1
+        url = reverse("property-list")
+        res = client.get(url, {"dist": 5000, "lat": 6.6, "lon": 3.35})
+        assert res.status_code == status.HTTP_200_OK
+        assert any(item["id"] == p1.id for item in res.data)
+
+        # 3. Query within 1km of a distant point (e.g. 7.0, 4.0)
+        # Should NOT find p1
+        res = client.get(url, {"dist": 1000, "lat": 7.0, "lon": 4.0})
+        assert res.status_code == status.HTTP_200_OK
+        assert not any(item["id"] == p1.id for item in res.data)
+
+    @patch("geopy.geocoders.Nominatim.reverse")
+    def test_reverse_geocoding_auto_population(self, mock_reverse, verified_owner):
+        """Test that city/state/country are auto-filled on save."""
+        user, client = verified_owner
+
+        # Mock Geopy response
+        class MockLocation:
+            raw = {
+                "address": {
+                    "city": "Lagos",
+                    "state": "Lagos State",
+                    "country": "Nigeria",
+                }
+            }
+
+        mock_reverse.return_value = MockLocation()
+
+        # Create property with coords
+        # This triggers _reverse_geocode in save()
+        res = client.post(
+            reverse("property-list"),
+            {
+                "title": "Auto Geocoded Villa",
+                "description": "Desc",
+                "price": 5000,
+                "latitude": 6.5,
+                "longitude": 3.4,
+                "address_text": "Lagos St",
+                "uploaded_images": [
+                    {"url": "http://test.com/1.jpg", "is_featured": True},
+                    {"url": "http://test.com/2.jpg", "is_featured": False},
+                    {"url": "http://test.com/3.jpg", "is_featured": False},
+                ],
+            },
+            format="json",
+        )
+        assert res.status_code == status.HTTP_201_CREATED
+
+        # Verify fields in DB
+        prop = Property.objects.get(id=res.data["id"])
+        assert prop.city == "Lagos"
+        assert prop.state == "Lagos State"
+        assert prop.country == "Nigeria"
+
+    def test_administrative_filters(self, verified_owner):
+        """Test filtering by city/state/country."""
+        user, client = verified_owner
+
+        Property.objects.create(
+            owner=user,
+            title="Abuja House",
+            price=1000,
+            city="Abuja",
+            state="FCT",
+            country="Nigeria",
+            latitude=9.0,
+            longitude=7.5,
+        )
+
+        url = reverse("property-list")
+
+        # Filter by city
+        res = client.get(url, {"city": "Abuja"})
+        assert len(res.data) == 1
+        assert res.data[0]["city"] == "Abuja"
+
+        # Filter by state
+        res = client.get(url, {"state": "FCT"})
+        assert len(res.data) == 1
+
+        # Filter by country (case-insensitive icontains test)
+        res = client.get(url, {"country": "nigeria"})
+        assert len(res.data) >= 1

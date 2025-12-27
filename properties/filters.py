@@ -42,5 +42,6 @@ class PropertyFilter(filters.FilterSet):
         lon = self.request.query_params.get("lon")
         if lat and lon and value:
             pnt = Point(float(lon), float(lat), srid=4326)
-            return queryset.filter(location__dwithin=(pnt, value))
+            # Use distance_lte with D objects to handle meters correctly on degrees SRID
+            return queryset.filter(location__distance_lte=(pnt, D(m=value)))
         return queryset

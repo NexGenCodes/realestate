@@ -53,7 +53,7 @@ def release_payments():
                 old_status=old_status,
                 new_status=tx.status,
                 changed_by=None,  # System
-                ip_address="CELERY_TASK",
+                ip_address="127.0.0.1",
             )
             count += 1
 

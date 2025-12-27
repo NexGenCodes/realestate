@@ -1,10 +1,10 @@
+from django.db import models
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions, generics
 from django.conf import settings
 from .models import Transaction, WithdrawalRequest
 from .services import PaymentService, FlutterwaveService
-from rest_framework.decorators import permission_classes
 from .serializers import TransactionSerializer
 
 
@@ -191,7 +191,7 @@ class InitiatePaymentView(APIView):
 
             property_obj = Property.objects.get(id=property_id)
 
-            if not property_obj.is_available:
+            if property_obj.status != Property.Status.AVAILABLE:
                 return Response(
                     {"error": "Property is not available for purchase"},
                     status=status.HTTP_400_BAD_REQUEST,
@@ -208,9 +208,11 @@ class InitiatePaymentView(APIView):
             # Check for existing pending transaction for this user/property to avoid duplicates?
             # Ideally yes, but multiple attempts are common. We just create a new ref.
 
+            from decimal import Decimal
+
             tx_ref = f"TX-{uuid.uuid4().hex[:12].upper()}"
             amount = property_obj.price
-            system_fee = amount * 0.10
+            system_fee = amount * Decimal("0.10")
             owner_amount = amount - system_fee
 
             transaction = Transaction.objects.create(
