@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # Third party
     "rest_framework",
+    "rest_framework.authtoken",
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
     "django_celery_results",
@@ -70,6 +71,15 @@ INSTALLED_APPS = [
     "properties",
     "users",
     "shared",
+    # Auth
+    "django.contrib.sites",
+    "allauth",
+    "allauth.account",
+    "allauth.socialaccount",
+    "allauth.socialaccount.providers.google",
+    "allauth.socialaccount.providers.apple",
+    "dj_rest_auth",
+    "dj_rest_auth.registration",
 ]
 
 MIDDLEWARE = [
@@ -80,6 +90,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -311,3 +322,55 @@ ADMIN_EMAIL = env(
 
 # Swagger/drf-yasg Settings
 SWAGGER_USE_COMPAT_RENDERERS = False
+
+# Social Auth Settings
+SITE_ID = 1
+
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "allauth.account.auth_backends.AuthenticationBackend",
+]
+
+# Allauth Settings
+ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+ACCOUNT_USERNAME_REQUIRED = False
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_AUTHENTICATION_METHOD = "email"
+ACCOUNT_EMAIL_VERIFICATION = "none"  # Or "optional", "mandatory"
+
+
+REST_AUTH = {
+    "USE_JWT": True,
+    "JWT_AUTH_COOKIE": "realestate-auth",
+    "JWT_AUTH_REFRESH_COOKIE": "realestate-refresh-token",
+    # We want to use our custom user model fields if needed, but defaults are usually fine
+}
+
+SOCIALACCOUNT_PROVIDERS = {
+    "google": {
+        "SCOPE": [
+            "profile",
+            "email",
+        ],
+        "AUTH_PARAMS": {
+            "access_type": "online",
+        },
+        "APPS": [
+            {
+                "client_id": env("GOOGLE_CLIENT_ID", default=""),
+                "secret": env("GOOGLE_SECRET", default=""),
+                "key": "",
+            }
+        ],
+    },
+    "apple": {
+        "APPS": [
+            {
+                "client_id": env("APPLE_CLIENT_ID", default=""),
+                "secret": env("APPLE_SECRET", default=""),
+                "key": env("APPLE_KEY", default=""),
+                "certificate_key": env("APPLE_CERTIFICATE_KEY", default=""),
+            }
+        ]
+    },
+}

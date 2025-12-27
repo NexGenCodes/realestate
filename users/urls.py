@@ -18,6 +18,7 @@ from .auth import (
     ResetPasswordView,
     CustomTokenObtainPairView,
 )
+from .social_views import GoogleLogin, AppleLogin
 
 router = DefaultRouter()
 router.register(r"admin/users", AdminUserViewSet, basename="admin-users")
@@ -37,6 +38,8 @@ urlpatterns = [
     path("auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("auth/forgot-password/", ForgotPasswordView.as_view(), name="forgot-password"),
     path("auth/reset-password/", ResetPasswordView.as_view(), name="reset-password"),
+    path("auth/google/", GoogleLogin.as_view(), name="google_login"),
+    path("auth/apple/", AppleLogin.as_view(), name="apple_login"),
     path("profile/", ProfileView.as_view(), name="profile"),
     path("owner-requests/", OwnerRequestView.as_view(), name="owner-requests"),
     path("", include(router.urls)),

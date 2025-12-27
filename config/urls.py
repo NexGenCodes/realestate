@@ -48,6 +48,7 @@ urlpatterns = [
     path("api/v1/properties/", include("properties.urls")),
     path("api/v1/", include(favorites_router.urls)),
     path("api/v1/users/", include("users.urls")),
+    path("api/v1/auth/", include("dj_rest_auth.urls")),
     # Documentation
     path(
         "swagger<format>/", schema_view.without_ui(cache_timeout=0), name="schema-json"

@@ -96,6 +96,26 @@ class AuthService:
                 return False
         return True  # Return true even if user doesn't exist for security (avoid enumeration)
 
+    @staticmethod
+    def reset_password(email, otp_code, new_password):
+        cache_key = f"reset_{email}"
+        cached_data = get_key(cache_key)
+
+        if not cached_data or cached_data["otp"] != otp_code:
+            return False, "Invalid or expired OTP."
+
+        try:
+            user = User.objects.get(email=email)
+            user.set_password(new_password)
+            user.save()
+            delete_key(cache_key)
+            logger.info(f"Password reset successful for {email}")
+            return True, None
+        except User.DoesNotExist:
+            # This handles the edge case where the user might have been deleted after requesting OTP
+            # or if the cache somehow outlived the user (rare)
+            return False, "User not found."
+
 
 class OwnerRequestService:
     @staticmethod

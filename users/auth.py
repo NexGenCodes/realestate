@@ -163,24 +163,20 @@ class ResetPasswordView(APIView):
             otp_code = serializer.validated_data["otp_code"]
             new_password = serializer.validated_data["new_password"]
 
-            cache_key = f"reset_{email}"
-            cached_data = get_key(cache_key)
+            success, error_or_none = AuthService.reset_password(
+                email, otp_code, new_password
+            )
 
-            if not cached_data or cached_data["otp"] != otp_code:
+            if success:
                 return Response(
-                    {"error": "Invalid or expired OTP."},
+                    {"message": "Password reset successfully."},
+                    status=status.HTTP_200_OK,
+                )
+            else:
+                return Response(
+                    {"error": error_or_none},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-
-            user = User.objects.get(email=email)
-            user.set_password(new_password)
-            user.save()
-            delete_key(cache_key)
-            logger.info(f"Password reset successful for {email}")
-
-            return Response(
-                {"message": "Password reset successfully."}, status=status.HTTP_200_OK
-            )
         logger.warning(
             f"Password reset attempt failed for {request.data.get('email', 'unknown')}"
         )

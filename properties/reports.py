@@ -1,13 +1,24 @@
 from django.template.loader import render_to_string
-from weasyprint import HTML
 import tempfile
 import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+try:
+    from weasyprint import HTML
+except OSError:
+    logger.warning("WeasyPrint not available. PDF generation will fail.")
+    HTML = None
 
 
 def generate_analytics_pdf(data, owner_email):
     """
     Generates a professional PDF report from analytics data.
     """
+    if not HTML:
+        raise ImportError("WeasyPrint is not installed or configured correctly.")
+
     html_content = render_to_string(
         "reports/analytics_report.html",
         {
