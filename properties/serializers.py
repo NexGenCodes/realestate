@@ -8,6 +8,7 @@ from .models import (
     Amenity,
     PropertyReview,
     TourRequest,
+    PropertyReport,
 )
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,8 @@ class PropertySerializer(serializers.ModelSerializer):
             "category_display",
             "title",
             "description",
-            "location",
+            "latitude",
+            "longitude",
             "address_text",
             "price",
             "property_type",
@@ -197,3 +199,12 @@ class FavoriteSerializer(serializers.ModelSerializer):
         model = Favorite
         fields = ["id", "user", "property", "property_details", "created_at"]
         read_only_fields = ["user"]
+
+
+class PropertyReportSerializer(serializers.ModelSerializer):
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+
+    class Meta:
+        model = PropertyReport
+        fields = ["id", "property", "user", "user_email", "reason", "created_at"]
+        read_only_fields = ["user", "created_at"]

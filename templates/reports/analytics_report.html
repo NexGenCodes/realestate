@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: 'Helvetica', sans-serif; color: #333; }
+        .header { text-align: center; border-bottom: 2px solid #007bff; padding-bottom: 20px; }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 30px; }
+        .stat-box { border: 1px solid #ddd; padding: 20px; border-radius: 8px; text-align: center; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #007bff; }
+        .stat-label { font-size: 14px; color: #666; }
+        .footer { margin-top: 50px; font-size: 10px; color: #999; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Property Analytics Report</h1>
+        <p>Owner: {{ owner_email }}</p>
+        <p>Generated on: {{ date }}</p>
+    </div>
+
+    <div style="margin-top: 40px;">
+        <h3>Performance Overview</h3>
+        <div class="stats-grid">
+            <div class="stat-box">
+                <div class="stat-value">{{ data.total_properties }}</div>
+                <div class="stat-label">Total Properties</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value">{{ data.total_views }}</div>
+                <div class="stat-label">Total Views</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value">{{ data.total_favorites }}</div>
+                <div class="stat-label">Total Favorites</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value">{{ data.total_tour_requests }}</div>
+                <div class="stat-label">Tour Requests</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        Real Estate Pro Platform - Confidential Report
+    </div>
+</body>
+</html>

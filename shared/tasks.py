@@ -26,8 +26,17 @@ def send_low_credit_alert_task(provider, balance, threshold):
 @shared_task
 def cleanup_stale_data():
     """
-    Periodic task to clean up old data.
+    Periodic task to clean up old data and keep DB lean.
     """
-    logger.info("Running system cleanup and health check...")
-    # Future logic: Remove rejected OwnerRequests older than 30 days, etc.
-    return "Cleanup check completed."
+    from users.models import Notification
+    from django.utils import timezone
+    from datetime import timedelta
+
+    logger.info("Running system cleanup...")
+
+    # 1. Clear notifications older than 30 days
+    threshold = timezone.now() - timedelta(days=30)
+    deleted_count, _ = Notification.objects.filter(created_at__lt=threshold).delete()
+
+    logger.info(f"Cleanup finished. Removed {deleted_count} old notifications.")
+    return f"Cleanup completed. Deleted {deleted_count} items."

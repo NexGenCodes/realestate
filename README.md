@@ -36,6 +36,21 @@ A production-grade Real Estate platform built with Django REST Framework, featur
 - **Spatial Indexing**: GIST indexes on `location` for sub-second proximity searches.
 - **Caching Strategy**: Intelligent invalidation that clears list caches only on property mutations (Create/Update/Delete).
 
+## 🛠️ Development Setup
+
+The easiest way to get started is by using the provided **DevContainer** configuration (requires VS Code + Remote Containers extension). This environment comes pre-installed with all system dependencies:
+- **GDAL** and **PostGIS** for geospatial features.
+- **Redis** for caching and rate limiting.
+- **Python / Django / Celery** stack.
+
+To use it:
+1. Clone the repository.
+2. Open the project in VS Code.
+3. When prompted, click **"Reopen in Container"**.
+
+### Manual Setup (Not Recommended)
+If you choose to setup manually, ensure you have PostgreSQL with PostGIS extension, Redis, and GDAL libraries installed on your host system.
+
 ## 🧪 Verification
 The platform is hardened with a consolidated test suite following DRF best practices:
 ```bash

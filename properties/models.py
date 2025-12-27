@@ -1,5 +1,7 @@
 import logging
-from django.contrib.gis.db import models
+from django.db import models
+from django.utils import timezone
+from shared.security import sanitize_html
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 from django.core.validators import MinValueValidator, MaxValueValidator
@@ -50,7 +52,8 @@ class Property(models.Model):
     description = models.TextField()
 
     # Geo-spatial location
-    location = models.PointField(srid=4326)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
     address_text = models.CharField(max_length=500)
 
     price = models.DecimalField(max_digits=15, decimal_places=2, db_index=True)
@@ -100,6 +103,9 @@ class Property(models.Model):
         return f"{self.title} ({self.get_status_display()})"
 
     def save(self, *args, **kwargs):
+        if self.description:
+            self.description = sanitize_html(self.description)
+
         # Handle status transitions
         if self.pk:
             old_instance = Property.objects.get(pk=self.pk)
@@ -190,3 +196,23 @@ class TourRequest(models.Model):
 
     def __str__(self):
         return f"Tour request for {self.property.title} by {self.requester.email}"
+
+
+class PropertyReport(models.Model):
+    property = models.ForeignKey(
+        Property, on_delete=models.CASCADE, related_name="reports"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="property_reports",
+    )
+    reason = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "property")
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Report on {self.property.title} by {self.user.email}"

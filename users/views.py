@@ -19,6 +19,8 @@ from .serializers import (
     NotificationSerializer,
 )
 from .models import OwnerRequest, SavedSearch, DeviceToken, Notification
+from shared.security import BurstRateThrottle
+from .services import OwnerRequestService, NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,11 @@ class ProfileView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_object(self):
         return self.request.user
+
+    def get_throttles(self):
+        if self.request.method in ["PUT", "PATCH"]:
+            return [BurstRateThrottle()]
+        return super().get_throttles()
 
     @swagger_auto_schema(
         operation_summary="Get/Update User Profile",
@@ -67,6 +74,7 @@ class ProfileView(generics.RetrieveUpdateDestroyAPIView):
 class OwnerRequestView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = OwnerRequestSerializer
+    throttle_classes = [BurstRateThrottle]
 
     @swagger_auto_schema(
         operation_summary="List/Create Owner Requests",
@@ -89,18 +97,10 @@ class OwnerRequestView(generics.ListCreateAPIView):
 
     @transaction.atomic
     def perform_create(self, serializer):
-        instance = serializer.save(user=self.request.user)
-        logger.info(f"Owner request {instance.id} created with status PENDING.")
-
-        check_email_credits()
-
-        # Notify admin of new owner request
-        notify_admin_new_owner_request(
-            user_name=f"{instance.user.first_name} {instance.user.last_name}",
-            user_email=instance.user.email,
-            id_type=instance.get_id_type_display(),
-            reason=instance.reason,
+        instance = OwnerRequestService.create_request(
+            self.request.user, serializer.validated_data
         )
+        serializer.instance = instance
 
 
 class AdminOwnerRequestViewSet(viewsets.ModelViewSet):
@@ -117,23 +117,7 @@ class AdminOwnerRequestViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def perform_update(self, serializer):
         instance = serializer.save()
-        if instance.status == OwnerRequest.Status.APPROVED:
-            instance.user.role = User.Role.OWNER
-            instance.user.is_verified_owner = True
-            instance.user.save()
-            instance.is_verified = True
-            instance.save()
-            notify_user_owner_request_status(instance.user.email, "APPROVED")
-            logger.info(
-                f"[OWNER_REQUEST] Admin {self.request.user.email} APPROVED request for {instance.user.email}"
-            )
-        elif instance.status == OwnerRequest.Status.REJECTED:
-            notify_user_owner_request_status(
-                instance.user.email, "REJECTED", reason=instance.admin_notes
-            )
-            logger.info(
-                f"[OWNER_REQUEST] Admin {self.request.user.email} REJECTED request for {instance.user.email}"
-            )
+        OwnerRequestService.process_request(instance, self.request.user)
 
 
 @swagger_auto_schema(
@@ -191,13 +175,17 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=["post"])
     def mark_as_read(self, request, pk=None):
         notification = self.get_object()
-        notification.is_read = True
-        notification.save()
-        return Response({"status": "notification marked as read"})
+        try:
+            NotificationService.mark_as_read(notification, request.user)
+            return Response({"status": "notification marked as read"})
+        except PermissionError as e:
+            return Response({"error": str(e)}, status=status.HTTP_403_FORBIDDEN)
 
     @action(detail=False, methods=["post"])
     def mark_all_as_read(self, request):
-        Notification.objects.filter(user=request.user, is_read=False).update(
-            is_read=True
+        """Mark all unread notifications for the current user as read."""
+        updated_count = NotificationService.mark_all_as_read(request.user)
+        return Response(
+            {"status": f"{updated_count} notifications marked as read"},
+            status=status.HTTP_200_OK,
         )
-        return Response({"status": "all notifications marked as read"})

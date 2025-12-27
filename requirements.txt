@@ -13,7 +13,9 @@ drf-yasg>=1.21.7
 django-cloudinary-storage>=0.3.0
 cloudinary>=1.38.0
 django-anymail[resend]>=11.1
-djangorestframework-gis>=1.0
 django-filter>=23.5
 pytest
 pytest-django
+bleach>=6.1.0
+sentry-sdk>=2.0.0
+weasyprint>=61.2

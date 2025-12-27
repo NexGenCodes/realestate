@@ -16,6 +16,8 @@ import os
 from datetime import timedelta
 from celery.schedules import crontab
 import sys
+import sentry_sdk
+from sentry_sdk.integrations.django import DjangoIntegration
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -36,6 +38,16 @@ DEBUG = env("DEBUG")
 
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS")
 
+# Sentry Monitoring
+SENTRY_DSN = env("SENTRY_DSN", default=None)
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[DjangoIntegration()],
+        traces_sample_rate=1.0,
+        send_default_pii=True,
+    )
+
 
 # Application definition
 
@@ -46,7 +58,6 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "django.contrib.gis",
     # Third party
     "rest_framework",
     "rest_framework_simplejwt",
@@ -95,9 +106,9 @@ WSGI_APPLICATION = "config.wsgi.application"
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
-    "default": env.db(default="postgis://postgres:postgres@db:5432/realestate_db")
+    "default": env.db(default="postgres://postgres:postgres@db:5432/realestate_db")
 }
-DATABASES["default"]["ENGINE"] = "django.contrib.gis.db.backends.postgis"
+DATABASES["default"]["ENGINE"] = "django.db.backends.postgresql"
 
 
 # Password validation
@@ -163,11 +174,25 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_THROTTLE_RATES": {
         "anon": "200/hour",
-        "user": "1000/hour",
+        "user": "2000/hour",
         "otp_request": "5/minute",
         "login_attempt": "10/minute",
+        "property_create": "50/day",  # Anti-spam
+        "burst": "60/minute",  # General burst limit
     },
 }
+
+# Production Security Headers
+if not DEBUG:
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    X_FRAME_OPTIONS = "DENY"
 
 # Relax rate limits for tests
 if "test" in sys.argv:
@@ -283,3 +308,6 @@ RESEND_LOW_CREDIT_THRESHOLD = env.int(
 ADMIN_EMAIL = env(
     "ADMIN_EMAIL", default=env("EMAIL_HOST_USER", default="admin@example.com")
 )
+
+# Swagger/drf-yasg Settings
+SWAGGER_USE_COMPAT_RENDERERS = False

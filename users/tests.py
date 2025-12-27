@@ -46,7 +46,7 @@ def admin_user(db, test_password):
 @pytest.mark.django_db
 class TestUsersApp:
 
-    @patch("users.auth.send_otp_email")
+    @patch("shared.messaging.send_otp_email")
     def test_auth_registration_flow(self, mock_email, api_client, test_password):
         # 1. Signup
         signup_data = {

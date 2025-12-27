@@ -10,11 +10,12 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    binutils \
-    libproj-dev \
-    gdal-bin \
     gcc \
     libpq-dev \
+    libpango-1.0-0 \
+    libharfbuzz0b \
+    libpangoft2-1.0-0 \
+    libgobject-2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies

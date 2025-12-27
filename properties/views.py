@@ -1,5 +1,6 @@
 import logging
 from django.db import transaction, models
+from django.utils import timezone
 from django.core.cache import cache
 from django.views.decorators.cache import cache_page
 from rest_framework import viewsets, permissions, status, filters
@@ -7,27 +8,37 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework_gis.filters import DistanceToPointFilter
 
-from .models import Property, Favorite, Amenity, PropertyReview, TourRequest
+from .models import (
+    Property,
+    Favorite,
+    Amenity,
+    PropertyReview,
+    TourRequest,
+    PropertyReport,
+)
 from .serializers import (
     PropertySerializer,
     FavoriteSerializer,
     AmenitySerializer,
     PropertyReviewSerializer,
     TourRequestSerializer,
+    PropertyReportSerializer,
 )
 from .filters import PropertyFilter
 from .permissions import IsOwnerRole, IsOwnerOrReadOnly
 from users.models import User
-from django.db.models import Avg
 from django.utils.decorators import method_decorator
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from shared.messaging import (
-    notify_owner_property_status_change,
-    check_email_credits,
-    notify_owner_new_tour_request,
+from shared.security import BurstRateThrottle
+from shared.webhooks import trigger_event
+from .reports import generate_analytics_pdf
+from .services import (
+    PropertyService,
+    ReportingService,
+    ReviewService,
+    TourRequestService,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,13 +65,17 @@ class PropertyViewSet(viewsets.ModelViewSet):
         DjangoFilterBackend,
         filters.SearchFilter,
         filters.OrderingFilter,
-        DistanceToPointFilter,
     ]
     filterset_class = PropertyFilter
-    search_fields = ["title", "description", "address_text"]
+    search_fields = ["title", "description", "address_text", "owner__email"]
     ordering_fields = ["price", "created_at", "average_rating", "views_count"]
-    distance_filter_field = "location"
-    distance_filter_convert_meters = True
+    permission_classes = [IsOwnerOrReadOnly]
+    throttle_classes = [BurstRateThrottle]
+
+    def get_throttles(self):
+        if self.action == "create":
+            self.throttle_scope = "property_create"
+        return super().get_throttles()
 
     def get_permissions(self):
         if self.action in ["list", "retrieve"]:
@@ -133,6 +148,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
         )
 
         serializer = self.get_serializer(qs, many=True)
+        logger.info(f"[PROPERTY] Found {len(qs)} similar properties for property {pk}")
         return Response(serializer.data)
 
     @swagger_auto_schema(
@@ -165,23 +181,16 @@ class PropertyViewSet(viewsets.ModelViewSet):
     def toggle_favorite(self, request, pk=None):
         """Toggle favorite status for the authenticated user."""
         property_obj = self.get_object()
-        favorite, created = Favorite.objects.get_or_create(
-            user=request.user, property=property_obj
-        )
+        added = PropertyService.toggle_favorite(property_obj, request.user)
 
-        if not created:
-            favorite.delete()
-            logger.info(
-                f"User {request.user.email} removed property {pk} from favorites."
+        if added:
+            return Response(
+                {"message": "Added to favorites."}, status=status.HTTP_201_CREATED
             )
+        else:
             return Response(
                 {"message": "Removed from favorites."}, status=status.HTTP_200_OK
             )
-
-        logger.info(f"User {request.user.email} added property {pk} to favorites.")
-        return Response(
-            {"message": "Added to favorites."}, status=status.HTTP_201_CREATED
-        )
 
     @swagger_auto_schema(
         operation_summary="Mark as rented",
@@ -196,26 +205,14 @@ class PropertyViewSet(viewsets.ModelViewSet):
     def mark_as_rented(self, request, pk=None):
         """Mark property as rented and notify owner."""
         property_obj = self.get_object()
-        if property_obj.status != Property.Status.AVAILABLE:
+        try:
+            PropertyService.mark_as_rented(property_obj, request.user)
             return Response(
-                {"error": "Only available properties can be marked as rented."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"message": "Property marked as rented. Owner notified."},
+                status=status.HTTP_200_OK,
             )
-
-        property_obj.status = Property.Status.RENTED
-        property_obj.save()  # This clears favorites automated via model save()
-
-        logger.info(f"Property {pk} marked as RENTED by user {request.user.email}.")
-
-        notify_owner_property_status_change(
-            property_obj.owner.email, property_obj.title, "RENTED"
-        )
-        check_email_credits()
-
-        return Response(
-            {"message": "Property marked as rented. Owner notified."},
-            status=status.HTTP_200_OK,
-        )
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @swagger_auto_schema(
         operation_summary="Mark as sold",
@@ -230,26 +227,14 @@ class PropertyViewSet(viewsets.ModelViewSet):
     def mark_as_sold(self, request, pk=None):
         """Mark property as sold and notify owner."""
         property_obj = self.get_object()
-        if property_obj.status != Property.Status.AVAILABLE:
+        try:
+            PropertyService.mark_as_sold(property_obj, request.user)
             return Response(
-                {"error": "Only available properties can be marked as sold."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"message": "Property marked as sold. Owner notified."},
+                status=status.HTTP_200_OK,
             )
-
-        property_obj.status = Property.Status.SOLD
-        property_obj.save()  # This clears favorites automated via model save()
-
-        logger.info(f"Property {pk} marked as SOLD by user {request.user.email}.")
-
-        notify_owner_property_status_change(
-            property_obj.owner.email, property_obj.title, "SOLD"
-        )
-        check_email_credits()
-
-        return Response(
-            {"message": "Property marked as sold. Owner notified."},
-            status=status.HTTP_200_OK,
-        )
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @swagger_auto_schema(
         operation_summary="Ban property",
@@ -269,15 +254,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
         """Admin only: Ban a property listing."""
         property_obj = self.get_object()
         reason = request.data.get("reason", "No reason provided.")
-        property_obj.is_banned = True
-        property_obj.ban_reason = reason
-        property_obj.status = Property.Status.BANNED
-        property_obj.save()
-
-        logger.warning(
-            f"Admin {request.user.email} BANNED property {pk}. Reason: {reason}"
-        )
-
+        PropertyService.ban_property(property_obj, reason, request.user)
         return Response(
             {"message": f"Property banned. Reason: {reason}"}, status=status.HTTP_200_OK
         )
@@ -303,12 +280,6 @@ class PropertyViewSet(viewsets.ModelViewSet):
     def appeal(self, request, pk=None):
         """Owner only: Appeal a banned property listing."""
         property_obj = self.get_object()
-        if not property_obj.is_banned:
-            return Response(
-                {"error": "Only banned properties can be appealed."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         appeal_text = request.data.get("appeal_text")
         if not appeal_text:
             return Response(
@@ -316,17 +287,14 @@ class PropertyViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        property_obj.appeal_status = Property.AppealStatus.PENDING
-        property_obj.appeal_text = appeal_text
-        property_obj.save()
-
-        logger.info(
-            f"Owner {request.user.email} submitted an APPEAL for property {pk}."
-        )
-
-        return Response(
-            {"message": "Appeal submitted for admin review."}, status=status.HTTP_200_OK
-        )
+        try:
+            PropertyService.appeal_ban(property_obj, appeal_text, request.user)
+            return Response(
+                {"message": "Appeal submitted for admin review."},
+                status=status.HTTP_200_OK,
+            )
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @swagger_auto_schema(
         operation_summary="Lift ban",
@@ -337,17 +305,33 @@ class PropertyViewSet(viewsets.ModelViewSet):
     def lift_ban(self, request, pk=None):
         """Admin only: Lift a ban on a property listing."""
         property_obj = self.get_object()
-        property_obj.is_banned = False
-        property_obj.status = Property.Status.AVAILABLE
-        property_obj.appeal_status = Property.AppealStatus.RESOLVED
-        property_obj.save()
-
-        logger.info(f"Admin {request.user.email} LIFTED BAN on property {pk}.")
-
+        PropertyService.lift_ban(property_obj, request.user)
         return Response(
             {"message": "Ban lifted. Property is now available."},
             status=status.HTTP_200_OK,
         )
+
+    @swagger_auto_schema(
+        operation_summary="Report property",
+        request_body=PropertyReportSerializer,
+        responses={201: "Property reported", 400: "Invalid report"},
+    )
+    @action(
+        detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated]
+    )
+    def report(self, request, pk=None):
+        """Allow users to report a property. Automatic ban at 5 reports."""
+        property_obj = self.get_object()
+        reason = request.data.get("reason", "No reason provided.")
+
+        try:
+            report_obj = ReportingService.report_property(
+                property_obj, request.user, reason
+            )
+            serializer = PropertyReportSerializer(report_obj)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class FavoriteViewSet(viewsets.ModelViewSet):
@@ -441,13 +425,16 @@ class PropertyAdminViewSet(viewsets.ReadOnlyModelViewSet):
         """Admin only: Ban a property listing."""
         property_obj = self.get_object()
         reason = request.data.get("reason", "No reason provided.")
-        property_obj.is_banned = True
-        property_obj.ban_reason = reason
-        property_obj.status = Property.Status.BANNED
-        property_obj.save()
+        PropertyService.ban_property(property_obj, reason, request.user)
 
-        logger.warning(
-            f"Admin {request.user.email} BANNED property {pk}. Reason: {reason}"
+        # Trigger webhook
+        trigger_event(
+            "property.banned",
+            {
+                "id": property_obj.id,
+                "title": property_obj.title,
+                "reason": reason,
+            },
         )
 
         return Response(
@@ -463,16 +450,73 @@ class PropertyAdminViewSet(viewsets.ReadOnlyModelViewSet):
     def lift_ban(self, request, pk=None):
         """Admin only: Lift a ban on a property listing."""
         property_obj = self.get_object()
-        property_obj.is_banned = False
-        property_obj.status = Property.Status.AVAILABLE
-        property_obj.appeal_status = Property.AppealStatus.RESOLVED
-        property_obj.save()
-
-        logger.info(f"Admin {request.user.email} LIFTED BAN on property {pk}.")
-
+        PropertyService.lift_ban(property_obj, request.user)
         return Response(
             {"message": "Ban lifted. Property is now available."},
             status=status.HTTP_200_OK,
+        )
+
+    @swagger_auto_schema(
+        operation_summary="Bulk status update (Admin)",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "property_ids": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(type=openapi.TYPE_INTEGER),
+                    description="List of property IDs",
+                ),
+                "action": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    enum=["ban", "lift_ban"],
+                    description="Action to perform",
+                ),
+                "reason": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="Reason (for banning)"
+                ),
+            },
+            required=["property_ids", "action"],
+        ),
+        responses={200: "Bulk update completed"},
+    )
+    @action(detail=False, methods=["post"])
+    def bulk_status_update(self, request):
+        """Admin only: Bulk ban or lift ban on properties."""
+        property_ids = request.data.get("property_ids", [])
+        action_type = request.data.get("action")
+        reason = request.data.get("reason", "Bulk action.")
+
+        properties = Property.objects.filter(id__in=property_ids)
+
+        if action_type == "ban":
+            properties.update(
+                is_banned=True,
+                ban_reason=reason,
+                status=Property.Status.BANNED,
+                updated_at=timezone.now(),
+            )
+            logger.warning(
+                f"Admin {request.user.email} bulk BANNED properties: {property_ids}"
+            )
+        elif action_type == "lift_ban":
+            properties.update(
+                is_banned=False,
+                status=Property.Status.AVAILABLE,
+                appeal_status=Property.AppealStatus.RESOLVED,
+                updated_at=timezone.now(),
+            )
+            logger.info(
+                f"Admin {request.user.email} bulk LIFTED BAN on properties: {property_ids}"
+            )
+        else:
+            return Response(
+                {"error": "Invalid action."}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        return Response(
+            {
+                "message": f"Bulk {action_type} completed for {properties.count()} properties."
+            }
         )
 
     @swagger_auto_schema(
@@ -512,27 +556,13 @@ class PropertyReviewViewSet(viewsets.ModelViewSet):
             return PropertyReview.objects.filter(property_id=property_id)
         return PropertyReview.objects.all()
 
-    @transaction.atomic
     def perform_create(self, serializer):
-        review = serializer.save(user=self.request.user)
-        # Update property average rating
-        prop = review.property
-        avg_rating = PropertyReview.objects.filter(property=prop).aggregate(
-            Avg("rating")
-        )["rating__avg"]
-        prop.average_rating = avg_rating or 0
-        prop.save()
-
-        # Notify Owner
-        from users.models import Notification
-
-        Notification.objects.create(
-            user=prop.owner,
-            title="New Review",
-            body=f"{self.request.user.email} reviewed your property '{prop.title}'.",
+        ReviewService.create_review(
+            property_obj=serializer.validated_data["property"],
+            user=self.request.user,
+            rating=serializer.validated_data["rating"],
+            comment=serializer.validated_data.get("comment", ""),
         )
-
-        logger.info(f"User {self.request.user.email} reviewed property {prop.id}")
 
 
 class TourRequestViewSet(viewsets.ModelViewSet):
@@ -560,42 +590,42 @@ class TourRequestViewSet(viewsets.ModelViewSet):
         )
 
     def perform_create(self, serializer):
-        instance = serializer.save(requester=self.request.user)
-
-        # Notify Owner (In-app + Email)
-        notify_owner_new_tour_request(
-            owner_email=instance.property.owner.email,
-            property_title=instance.property.title,
-            requester_email=self.request.user.email,
-            slot=instance.slot,
-        )
-
-        logger.info(
-            f"[TOUR_REQUEST] User {self.request.user.email} requested a tour for property {instance.property.id}"
+        TourRequestService.create_tour_request(
+            property_obj=serializer.validated_data["property"],
+            requester=self.request.user,
+            slot=serializer.validated_data["slot"],
+            message=serializer.validated_data.get("message", ""),
         )
 
     @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrReadOnly])
     def approve(self, request, pk=None):
         tour = self.get_object()
-        tour.status = TourRequest.Status.APPROVED
-        tour.save()
+        TourRequestService.update_status(
+            tour, TourRequest.Status.APPROVED, request.user
+        )
         return Response({"status": "Tour request approved"})
 
     @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrReadOnly])
     def reject(self, request, pk=None):
         tour = self.get_object()
-        tour.status = TourRequest.Status.REJECTED
-        tour.save()
+        TourRequestService.update_status(
+            tour, TourRequest.Status.REJECTED, request.user
+        )
         return Response({"status": "Tour request rejected"})
 
 
-class OwnerAnalyticsView(APIView):
-    """Owner dashboard analytics endpoint."""
+class OwnerAnalyticsViewSet(viewsets.ViewSet):
+    """Owner dashboard analytics ViewSet."""
 
     permission_classes = [permissions.IsAuthenticated, IsOwnerRole]
 
-    def get(self, request):
+    def list(self, request):
         user = request.user
+        cache_key = f"owner_analytics_{user.id}"
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            return Response(cached_data)
+
         owner_properties = Property.objects.filter(owner=user)
 
         total_views = owner_properties.aggregate(models.Sum("views_count"))[
@@ -604,11 +634,41 @@ class OwnerAnalyticsView(APIView):
         total_favorites = Favorite.objects.filter(property__owner=user).count()
         total_tours = TourRequest.objects.filter(property__owner=user).count()
 
-        return Response(
-            {
-                "total_properties": owner_properties.count(),
-                "total_views": total_views or 0,
-                "total_favorites": total_favorites,
-                "total_tour_requests": total_tours,
-            }
-        )
+        data = {
+            "total_properties": owner_properties.count(),
+            "total_views": total_views or 0,
+            "total_favorites": total_favorites,
+            "total_tour_requests": total_tours,
+        }
+        cache.set(cache_key, data, timeout=300)  # 5 minute cache
+        return Response(data)
+
+    @action(detail=False, methods=["get"], url_path="export-report")
+    def export_report(self, request):
+        from django.http import HttpResponse
+        from django.utils import timezone
+
+        user = request.user
+        # Get data (re-using logic or cache)
+        owner_properties = Property.objects.filter(owner=user)
+        total_views = owner_properties.aggregate(models.Sum("views_count"))[
+            "views_count__sum"
+        ]
+        total_favorites = Favorite.objects.filter(property__owner=user).count()
+        total_tours = TourRequest.objects.filter(property__owner=user).count()
+
+        data = {
+            "total_properties": owner_properties.count(),
+            "total_views": total_views or 0,
+            "total_favorites": total_favorites,
+            "total_tour_requests": total_tours,
+            "generated_at": timezone.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+        pdf_content = generate_analytics_pdf(data, user.email)
+
+        logger.info(f"[ANALYTICS] PDF report generated for owner {user.email}")
+
+        response = HttpResponse(pdf_content, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="analytics_report.pdf"'
+        return response

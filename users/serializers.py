@@ -123,27 +123,6 @@ class OwnerRequestSerializer(serializers.ModelSerializer):
                 )
         return value
 
-    def create(self, validated_data):
-        documents = validated_data.pop("documents", None)
-        instance = OwnerRequest(**validated_data)
-
-        if documents:
-            try:
-                # We need the user from context for logging
-                user = self.context["request"].user
-                logger.info(f"Uploading owner documents for user {user.email}")
-                upload_result = cloudinary.uploader.upload(
-                    documents, folder="owner_documents/", resource_type="auto"
-                )
-                instance.documents_url = upload_result.get("secure_url")
-                logger.info(f"Cloudinary upload success: {instance.documents_url}")
-            except Exception as e:
-                logger.error(f"Cloudinary upload failed: {str(e)}")
-                raise serializers.ValidationError("Failed to upload documents.")
-
-        instance.save()
-        return instance
-
 
 class AdminOwnerRequestSerializer(serializers.ModelSerializer):
     user_email = serializers.CharField(source="user.email", read_only=True)

@@ -38,5 +38,26 @@
 | `admin/properties/{id}/ban/` | POST | Ban a property | Admin |
 | `analytics/` | GET | Real-time platform stats | Admin/Owner |
 
+## 📋 Property Schema
+When creating or updating properties, use the following fields:
+
+### Location Fields
+- `latitude` (float): Latitude coordinate (e.g., `40.7128`)
+- `longitude` (float): Longitude coordinate (e.g., `-74.0060`)
+- `address_text` (string): Human-readable address
+
+### Core Fields
+- `title` (string): Property title
+- `description` (text): Detailed description
+- `price` (decimal): Property price
+- `property_type` (choice): `RENT` or `SALE`
+- `category` (choice): `HOUSE`, `SHOP`, `LAND`, or `APARTMENT`
+- `bedrooms` (int): Number of bedrooms
+- `bathrooms` (int): Number of bathrooms
+- `area_sqft` (decimal): Area in square feet
+
 ---
-*Note: Most list endpoints support standard DRF filtering (`?category=RESIDENTIAL`) and ordering (`?ordering=-price`).*
+**Note**: 
+- Most list endpoints support standard DRF filtering (`?category=RESIDENTIAL`) and ordering (`?ordering=-price`)
+- The API uses standard latitude/longitude coordinates (no PostGIS/GIS dependencies)
+- All coordinates use WGS84 datum (SRID 4326 equivalent)
