@@ -16,6 +16,9 @@ RUN apt-get update && apt-get install -y \
     libharfbuzz0b \
     libpangoft2-1.0-0 \
     libgobject-2.0-0 \
+    binutils \
+    libproj-dev \
+    gdal-bin \
     && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies

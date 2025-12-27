@@ -18,6 +18,8 @@ from celery.schedules import crontab
 import sys
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
+import firebase_admin
+from firebase_admin import credentials
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -58,6 +60,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.gis",
     # Third party
     "rest_framework",
     "rest_framework.authtoken",
@@ -71,6 +74,7 @@ INSTALLED_APPS = [
     "properties",
     "users",
     "shared",
+    "payments",
     # Auth
     "django.contrib.sites",
     "allauth",
@@ -80,10 +84,13 @@ INSTALLED_APPS = [
     "allauth.socialaccount.providers.apple",
     "dj_rest_auth",
     "dj_rest_auth.registration",
+    "fcm_django",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "django.middleware.gzip.GZipMiddleware",  # Enable Compression
+    "django.contrib.sessions.middleware.SessionMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -117,9 +124,10 @@ WSGI_APPLICATION = "config.wsgi.application"
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
-    "default": env.db(default="postgres://postgres:postgres@db:5432/realestate_db")
+    "default": env.db(default="postgis://postgres:postgres@db:5432/realestate_db")
 }
-DATABASES["default"]["ENGINE"] = "django.db.backends.postgresql"
+DATABASES["default"]["ENGINE"] = "django.contrib.gis.db.backends.postgis"
+DATABASES["default"]["CONN_MAX_AGE"] = 600  # Persistent connections for 10 minutes
 
 
 # Password validation
@@ -205,8 +213,8 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
     X_FRAME_OPTIONS = "DENY"
 
-# Relax rate limits for tests
-if "test" in sys.argv:
+# Relax limits for tests
+if "test" in sys.argv or "pytest" in sys.modules:
     REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
         k: "1000/second" for k in REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]
     }
@@ -232,6 +240,12 @@ CACHES = {
     }
 }
 
+if "test" in sys.argv or "pytest" in sys.modules:
+    CACHES["default"] = {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    }
+    CELERY_TASK_ALWAYS_EAGER = True
+
 # Celery
 CELERY_BROKER_URL = env("CELERY_BROKER_URL")
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND")
@@ -243,6 +257,14 @@ CELERY_BEAT_SCHEDULE = {
     "cleanup-stale-data": {
         "task": "shared.tasks.cleanup_stale_data",
         "schedule": crontab(hour=0, minute=0),  # Run daily at midnight
+    },
+    "sync-view-counts": {
+        "task": "shared.tasks.sync_view_counts",
+        "schedule": crontab(minute="*/10"),  # Run every 10 minutes
+    },
+    "release-payments": {
+        "task": "payments.tasks.release_payments",
+        "schedule": crontab(hour=0, minute=0),
     },
 }
 
@@ -311,6 +333,14 @@ if CLOUDINARY_STORAGE["CLOUD_NAME"]:
 else:
     DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
 
+# Flutterwave Settings
+FLW_PUBLIC_KEY = env("FLW_PUBLIC_KEY", default="")
+FLW_SECRET_KEY = env("FLW_SECRET_KEY", default="")
+FLW_ENCRYPTION_KEY = env("FLW_ENCRYPTION_KEY", default="")
+FLW_SECRET_HASH = env(
+    "FLW_SECRET_HASH", default=""
+)  # For webhook signature verification
+
 
 # Email Credit Monitoring
 RESEND_LOW_CREDIT_THRESHOLD = env.int(
@@ -374,3 +404,16 @@ SOCIALACCOUNT_PROVIDERS = {
         ]
     },
 }
+
+
+# FCM Push Notifications (HTTP v1 API)
+FCM_DJANGO_SETTINGS = {
+    "APP_VERBOSE_NAME": "Real Estate App",
+    # FCM_SERVER_KEY is removed to enforce V1 API
+    "ONE_DEVICE_PER_USER": False,
+    "DELETE_INACTIVE_DEVICES": True,
+}
+
+# Initialize Firebase
+cred = credentials.Certificate(os.path.join(BASE_DIR, "serviceAccountKey.json"))
+firebase_admin.initialize_app(cred)

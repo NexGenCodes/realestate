@@ -3,7 +3,7 @@ import cloudinary.uploader
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
-from .models import OwnerRequest, SavedSearch, DeviceToken, Notification
+from .models import OwnerRequest, SavedSearch, Notification
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -168,13 +168,6 @@ class SavedSearchSerializer(serializers.ModelSerializer):
     class Meta:
         model = SavedSearch
         fields = ["id", "name", "filters", "notification_enabled", "created_at"]
-        read_only_fields = ["created_at"]
-
-
-class DeviceTokenSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = DeviceToken
-        fields = ["id", "token", "platform", "created_at"]
         read_only_fields = ["created_at"]
 
 

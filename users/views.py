@@ -15,10 +15,9 @@ from .serializers import (
     OwnerRequestSerializer,
     AdminOwnerRequestSerializer,
     SavedSearchSerializer,
-    DeviceTokenSerializer,
     NotificationSerializer,
 )
-from .models import OwnerRequest, SavedSearch, DeviceToken, Notification
+from .models import OwnerRequest, SavedSearch, Notification
 from shared.security import BurstRateThrottle
 from .services import OwnerRequestService, NotificationService
 
@@ -148,19 +147,6 @@ class SavedSearchViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
         logger.info(f"User {self.request.user.email} saved a new search.")
-
-
-class DeviceTokenViewSet(viewsets.ModelViewSet):
-    """ViewSet for managing user device tokens for push notifications."""
-
-    serializer_class = DeviceTokenSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get_queryset(self):
-        return DeviceToken.objects.filter(user=self.request.user)
-
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
 
 
 class NotificationViewSet(viewsets.ReadOnlyModelViewSet):

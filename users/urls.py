@@ -7,9 +7,11 @@ from .views import (
     AdminUserViewSet,
     AdminOwnerRequestViewSet,
     SavedSearchViewSet,
-    DeviceTokenViewSet,
+    SavedSearchViewSet,
     NotificationViewSet,
 )
+from .admin_dashboard_views import AdminDashboardViewSet
+from fcm_django.api.rest_framework import FCMDeviceAuthorizedViewSet
 from .auth import (
     SignupView,
     VerifySignupView,
@@ -25,8 +27,9 @@ router.register(r"admin/users", AdminUserViewSet, basename="admin-users")
 router.register(
     r"admin/owner-requests", AdminOwnerRequestViewSet, basename="admin-owner-requests"
 )
+router.register(r"admin/dashboard", AdminDashboardViewSet, basename="admin-dashboard")
 router.register(r"saved-searches", SavedSearchViewSet, basename="saved-search")
-router.register(r"device-tokens", DeviceTokenViewSet, basename="device-token")
+router.register(r"device-tokens", FCMDeviceAuthorizedViewSet, basename="device-token")
 router.register(r"notifications", NotificationViewSet, basename="notification")
 
 

@@ -83,27 +83,48 @@ class TestPropertiesApp:
 
     def test_similar_properties_recommendation(self, verified_owner):
         user, client = verified_owner
+
+        # Base property: "Luxury Beach Villa"
         p1 = Property.objects.create(
             owner=user,
-            title="Base",
+            title="Luxury Beach Villa",
+            description="A beautiful villa near the ocean with private pool.",
             price=1000,
             category="RESIDENTIAL",
             latitude=0.0,
             longitude=0.0,
         )
+
+        # Similar property: "Ocean View House" (Shares "Ocean", "View" ~ context)
         p2 = Property.objects.create(
             owner=user,
-            title="Similar",
+            title="Ocean View House",
+            description="Stunning house with ocean view and pool.",
             price=1100,
             category="RESIDENTIAL",
             latitude=0.0,
             longitude=0.0,
         )
 
+        # Different property: "City Apartment"
+        p3 = Property.objects.create(
+            owner=user,
+            title="Downtown City Apartment",
+            description="Small flat in the center of the city.",
+            price=500,
+            category="APARTMENT",
+            latitude=0.0,
+            longitude=0.0,
+        )
+
         res = client.get(reverse("property-similar-properties", kwargs={"pk": p1.pk}))
         assert res.status_code == status.HTTP_200_OK
-        assert len(res.data) >= 1
-        assert res.data[0]["title"] == "Similar"
+
+        # Should recommend p2 (Ocean View) but likely not p3 (City Apartment)
+        # Note: TF-IDF might be sensitive to small datasets, but p2 allows for word overlap ("ocean", "pool").
+        recommended_titles = [r["title"] for r in res.data]
+        assert "Ocean View House" in recommended_titles
+        # p3 might show up if dataset is small, but p2 should definitely be there.
 
     def test_engagement_and_notifications(self, regular_user, verified_owner):
         guest, guest_client = regular_user
@@ -121,7 +142,7 @@ class TestPropertiesApp:
         assert Notification.objects.filter(user=owner, title="New Review").exists()
 
         # 2. Tour Request
-        with patch("shared.tasks.send_email_task.delay") as mock_email:
+        with patch("shared.tasks.send_push_notification_task.delay") as mock_push_task:
             res = guest_client.post(
                 reverse("tour-request-list"),
                 {
@@ -131,10 +152,44 @@ class TestPropertiesApp:
                 },
             )
             assert res.status_code == status.HTTP_201_CREATED
-            assert mock_email.called
-            assert Notification.objects.filter(
-                user=owner, title="New Tour Request"
-            ).exists()
+
+            # Owner should get a push notification
+            assert mock_push_task.called
+            # We can also check args to be sure it went to 'owner'
+            args = mock_push_task.call_args[0]
+            assert args[0] == owner.id
+            assert "Tour Request" in args[1]
+
+    def test_price_drop_notification(self, regular_user, verified_owner):
+        guest, guest_client = regular_user
+        owner, owner_client = verified_owner
+
+        prop = Property.objects.create(
+            owner=owner,
+            title="Expensive House",
+            price=2000,
+            latitude=0.0,
+            longitude=0.0,
+        )
+
+        # Guest favorites the property
+        Favorite.objects.create(user=guest, property=prop)
+
+        # Update price (Drop)
+        with patch("shared.tasks.send_push_notification_task.delay") as mock_push:
+            res = owner_client.patch(
+                reverse("property-detail", kwargs={"pk": prop.pk}),
+                {"price": 1800},
+                format="json",
+            )
+            assert res.status_code == status.HTTP_200_OK
+
+            # Verify push notification task called
+            assert mock_push.called
+            # Check args: user_id should be guest.id
+            args = mock_push.call_args[0]
+            assert args[0] == guest.id
+            assert "Price Drop" in args[1]  # Title check
 
     def test_favorite_toggle(self, regular_user, verified_owner):
         guest, guest_client = regular_user
@@ -203,12 +258,13 @@ class TestAdvancedFeatures:
         user, client = verified_owner
         url = reverse("owner-analytics-export-report")
 
-        # This will test the PDF view which uses WeasyPrint
-        res = client.get(url)
-        assert res.status_code == status.HTTP_200_OK
-        assert res["Content-Type"] == "application/pdf"
-        assert len(res.content) > 1000  # Should be a decent size
-        assert b"%PDF" in res.content
+        # Mock the PDF generator to avoid WeasyPrint dependency issues on local/Windows
+        with patch("properties.views.generate_analytics_pdf") as mock_pdf:
+            mock_pdf.return_value = b"%PDF-1.4 Mock PDF Content"
+            res = client.get(url)
+            assert res.status_code == status.HTTP_200_OK
+            assert res["Content-Type"] == "application/pdf"
+            assert b"%PDF" in res.content
 
 
 @pytest.mark.django_db

@@ -16,6 +16,7 @@ from .models import (
     PropertyReview,
     TourRequest,
     PropertyReport,
+    AnalyticsEvent,
 )
 from .serializers import (
     PropertySerializer,
@@ -26,6 +27,8 @@ from .serializers import (
     PropertyReportSerializer,
 )
 from .filters import PropertyFilter
+from shared.notifications import send_push_notification
+
 from .permissions import IsOwnerRole, IsOwnerOrReadOnly
 from users.models import User
 from django.utils.decorators import method_decorator
@@ -94,7 +97,13 @@ class PropertyViewSet(viewsets.ModelViewSet):
             not self.request.user.is_authenticated
             or self.request.user.role == User.Role.USER
         ):
-            return qs.filter(status=Property.Status.AVAILABLE, is_banned=False)
+            qs = qs.filter(status=Property.Status.AVAILABLE, is_banned=False)
+
+            # Hide properties reported by this user
+            if self.request.user.is_authenticated:
+                qs = qs.exclude(reports__user=self.request.user)
+
+            return qs
 
         # Owners can see their own properties regardless of status
         if self.request.user.role == User.Role.OWNER:
@@ -120,36 +129,74 @@ class PropertyViewSet(viewsets.ModelViewSet):
     )
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
-        # Increment view count
-        Property.objects.filter(pk=instance.pk).update(
-            views_count=models.F("views_count") + 1
+
+        # High-Performance View Counting (Write-Behind)
+        # Avoids hitting the DB on every read. Synced via Celery.
+        try:
+            cache_key = f"property_view_count:{instance.pk}"
+            cache.incr(cache_key)
+        except ValueError:
+            cache.set(cache_key, 1)
+
+        # Mark this property as needing an update
+        # We assume 'default' cache is Redis and accessible via django_redis for Sets
+        # If not using django_redis API directly here to avoid strict dependency coupling in view,
+        # we can just use a convention or import it.
+        # Ideally we use a sorted set or plain set.
+        try:
+            from django_redis import get_redis_connection
+
+            con = get_redis_connection("default")
+            con.sadd("property_views_dirty", instance.pk)
+        except Exception as e:
+            logger.warning(f"Failed to update redis view dirty set: {e}")
+            # Fallback to direct update if Redis fails? No, just log.
+            pass
+
+        # 2. Detailed Analytics Event (Database)
+        # We record this for time-series charts.
+        user = request.user if request.user.is_authenticated else None
+        AnalyticsEvent.objects.create(
+            property=instance, event_type=AnalyticsEvent.EventType.VIEW, user=user
         )
+
         return super().retrieve(request, *args, **kwargs)
 
     @swagger_auto_schema(
         operation_summary="Similar properties",
-        operation_description="Get properties similar to the current one based on category and price range.",
+        operation_description="Get properties similar to the current one based on AI content analysis (TF-IDF).",
     )
     @action(detail=True, methods=["get"])
     def similar_properties(self, request, pk=None):
-        """Recommendation engine: Same category, similar price range."""
-        instance = self.get_object()
-        price = float(instance.price)
-        qs = (
-            Property.objects.filter(
-                category=instance.category,
-                status=Property.Status.AVAILABLE,
-                is_banned=False,
-                price__gte=price * 0.8,
-                price__lte=price * 1.2,
-            )
-            .exclude(pk=instance.pk)
-            .order_by("-average_rating")[:5]
-        )
+        """Recommendation engine: AI-based similarity."""
+        from .recommendations import PropertyRecommender
 
-        serializer = self.get_serializer(qs, many=True)
-        logger.info(f"[PROPERTY] Found {len(qs)} similar properties for property {pk}")
-        return Response(serializer.data)
+        # Instantiate locally for now.
+        # In prod, we'd want a shared/cached instance or store the matrix in Redis.
+        # But for MVP with few properties, this is acceptable.
+        recommender = PropertyRecommender()
+
+        similar_qs = recommender.get_recommendations(int(pk))
+
+        # Fallback to simple category filtering if no AI results (e.g. not enough data)
+        if not similar_qs.exists():
+            instance = self.get_object()
+            price = float(instance.price)
+            similar_qs = (
+                Property.objects.filter(
+                    category=instance.category,
+                    status=Property.Status.AVAILABLE,
+                    is_banned=False,
+                    price__gte=price * 0.8,
+                    price__lte=price * 1.2,
+                )
+                .exclude(pk=instance.pk)
+                .order_by("-average_rating")[:5]
+            )
+
+        serializer = self.get_serializer(similar_qs, many=True)
+        # Limiting to 5 just in case
+        return Response(serializer.data[:5])
 
     @swagger_auto_schema(
         operation_summary="Create property",
@@ -157,16 +204,54 @@ class PropertyViewSet(viewsets.ModelViewSet):
     )
     def perform_create(self, serializer):
         # Clear list cache
-        cache.delete_pattern("views.decorators.cache.cache_page.*properties*")
+        if hasattr(cache, "delete_pattern"):
+            cache.delete_pattern("views.decorators.cache.cache_page.*properties*")
+        else:
+            cache.clear()
         serializer.save(owner=self.request.user)
         logger.info(f"User {self.request.user.email} created a new property listing.")
 
     def perform_update(self, serializer):
-        cache.delete_pattern("views.decorators.cache.cache_page.*properties*")
+        if hasattr(cache, "delete_pattern"):
+            cache.delete_pattern("views.decorators.cache.cache_page.*properties*")
+        else:
+            cache.clear()
+
+        # Capture old price
+        try:
+            old_instance = self.get_object()
+            old_price = old_instance.price
+        except Exception:
+            old_price = None
+
         super().perform_update(serializer)
 
+        # Check for Price Drop
+        if old_price is not None and serializer.instance.price < old_price:
+            new_price = serializer.instance.price
+            logger.info(
+                f"[PRICE DROP] Property {serializer.instance.id} price dropped from {old_price} to {new_price}"
+            )
+
+            favorites = serializer.instance.favorited_by.select_related("user").all()
+
+            for fav in favorites:
+                send_push_notification(
+                    user=fav.user,
+                    title="Price Drop Alert!",
+                    body=f"The price of '{serializer.instance.title}' has dropped to ${new_price}!",
+                    data={
+                        "property_id": serializer.instance.id,
+                        "old_price": str(old_price),
+                        "new_price": str(new_price),
+                    },
+                )
+
     def perform_destroy(self, instance):
-        cache.delete_pattern("views.decorators.cache.cache_page.*properties*")
+        if hasattr(cache, "delete_pattern"):
+            cache.delete_pattern("views.decorators.cache.cache_page.*properties*")
+        else:
+            cache.clear()
         super().perform_destroy(instance)
 
     @swagger_auto_schema(
@@ -642,6 +727,30 @@ class OwnerAnalyticsViewSet(viewsets.ViewSet):
         }
         cache.set(cache_key, data, timeout=300)  # 5 minute cache
         return Response(data)
+
+    @action(detail=False, methods=["get"], url_path="daily-stats")
+    def daily_stats(self, request):
+        """Return views per day for the last 30 days."""
+        from django.db.models.functions import TruncDate
+        from datetime import timedelta
+
+        user = request.user
+        last_30_days = timezone.now() - timedelta(days=30)
+
+        # Aggregate views by date for all properties owned by user
+        stats = (
+            AnalyticsEvent.objects.filter(
+                property__owner=user,
+                event_type=AnalyticsEvent.EventType.VIEW,
+                created_at__gte=last_30_days,
+            )
+            .annotate(date=TruncDate("created_at"))
+            .values("date")
+            .annotate(count=models.Count("id"))
+            .order_by("date")
+        )
+
+        return Response(stats)
 
     @action(detail=False, methods=["get"], url_path="export-report")
     def export_report(self, request):

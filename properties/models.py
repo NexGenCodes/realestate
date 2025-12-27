@@ -1,5 +1,6 @@
 import logging
-from django.db import models
+from django.contrib.gis.db import models
+from django.contrib.gis.geos import Point
 from django.utils import timezone
 from shared.security import sanitize_html
 from django.conf import settings
@@ -51,10 +52,18 @@ class Property(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField()
 
-    # Geo-spatial location
+    # Geo-spatial location (PostGIS PointField)
+    location = models.PointField(srid=4326, null=True, blank=True)
+    # Keeping latitude/longitude as legacy fields for backwards compatibility with existing frontend logic
+    # but primarily using 'location' for spatial queries.
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
     address_text = models.CharField(max_length=500)
+
+    # Administrative Data (Auto-filled via Reverse Geocoding)
+    city = models.CharField(max_length=100, blank=True, db_index=True)
+    state = models.CharField(max_length=100, blank=True, db_index=True)
+    country = models.CharField(max_length=100, blank=True, db_index=True)
 
     price = models.DecimalField(max_digits=15, decimal_places=2, db_index=True)
     property_type = models.CharField(
@@ -97,6 +106,11 @@ class Property(models.Model):
             models.Index(fields=["status", "category"]),
             models.Index(fields=["status", "property_type"]),
             models.Index(fields=["owner", "status"]),
+            # Composite indexes for common filters
+            models.Index(fields=["status", "price"]),
+            models.Index(fields=["status", "category", "price"]),
+            models.Index(fields=["property_type", "price"]),
+            models.Index(fields=["is_banned", "status"]),
         ]
 
     def __str__(self):
@@ -105,6 +119,19 @@ class Property(models.Model):
     def save(self, *args, **kwargs):
         if self.description:
             self.description = sanitize_html(self.description)
+
+        # Automatically sync latitude/longitude to the PostGIS PointField
+        if self.latitude is not None and self.longitude is not None:
+            new_location = Point(float(self.longitude), float(self.latitude))
+
+            # Only geocode if location changed or fields are empty
+            if self.location != new_location or not self.city:
+                self.location = new_location
+                self._reverse_geocode()
+        elif self.location:
+            # If location exists but lat/lon are missing, sync back
+            self.latitude = self.location.y
+            self.longitude = self.location.x
 
         # Handle status transitions
         if self.pk:
@@ -120,6 +147,31 @@ class Property(models.Model):
                 Favorite.objects.filter(property=self).delete()
 
         super().save(*args, **kwargs)
+
+    def _reverse_geocode(self):
+        """Helper to fetch city, state, country from coordinates."""
+        from geopy.geocoders import Nominatim
+        from geopy.exc import GeopyError
+
+        try:
+            geolocator = Nominatim(user_agent="realestate_app")
+            location = geolocator.reverse(
+                f"{self.latitude}, {self.longitude}", language="en"
+            )
+            if location and location.raw.get("address"):
+                address = location.raw["address"]
+                self.city = (
+                    address.get("city")
+                    or address.get("town")
+                    or address.get("village")
+                    or ""
+                )
+                self.state = address.get("state") or ""
+                self.country = address.get("country") or ""
+        except GeopyError as e:
+            logger.warning(f"Reverse geocoding failed for property {self.id}: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error during geocoding: {e}")
 
 
 class PropertyImage(models.Model):
@@ -216,3 +268,34 @@ class PropertyReport(models.Model):
 
     def __str__(self):
         return f"Report on {self.property.title} by {self.user.email}"
+
+
+class AnalyticsEvent(models.Model):
+    class EventType(models.TextChoices):
+        VIEW = "VIEW", _("View")
+        FAVORITE = "FAVORITE", _("Favorite")
+        SHARE = "SHARE", _("Share")
+        CONTACT = "CONTACT", _("Contact")
+
+    property = models.ForeignKey(
+        Property, on_delete=models.CASCADE, related_name="analytics_events"
+    )
+    event_type = models.CharField(max_length=20, choices=EventType.choices)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="analytics_events",
+    )
+    # Generic info for anonymous users (e.g. session id / ip hash) - omitting for compliance simplicity
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["property", "event_type", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type} on {self.property.title} at {self.created_at}"

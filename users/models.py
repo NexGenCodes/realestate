@@ -97,18 +97,6 @@ class SavedSearch(models.Model):
         return f"{self.name} ({self.user.email})"
 
 
-class DeviceToken(models.Model):
-    user = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name="device_tokens"
-    )
-    token = models.CharField(max_length=255, unique=True)
-    platform = models.CharField(max_length=20)  # e.g., ios, android, web
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"{self.user.email} - {self.platform}"
-
-
 class Notification(models.Model):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="notifications"

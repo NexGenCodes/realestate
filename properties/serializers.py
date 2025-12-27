@@ -99,6 +99,9 @@ class PropertySerializer(serializers.ModelSerializer):
             "latitude",
             "longitude",
             "address_text",
+            "city",
+            "state",
+            "country",
             "price",
             "property_type",
             "status",
@@ -128,6 +131,9 @@ class PropertySerializer(serializers.ModelSerializer):
             "average_rating",
             "images",
             "reviews",
+            "city",
+            "state",
+            "country",
         ]
 
     def get_is_favorited(self, obj):

@@ -2,7 +2,6 @@ import logging
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
-from .tasks import send_low_credit_alert_task
 from shared.cache_utils import get_key
 
 logger = logging.getLogger(__name__)
@@ -169,10 +168,13 @@ Please log in to your dashboard to approve or reject this request.
         html_message=None,
     )
 
-    # In-App Notification
+    # In-App & Push Notification
     try:
+        from users.models import User
+        from shared.notifications import send_push_notification
+
         user = User.objects.get(email=owner_email)
-        Notification.objects.create(
+        send_push_notification(
             user=user,
             title="New Tour Request",
             body=f"{requester_email} wants to tour '{property_title}' at {slot}.",
@@ -200,10 +202,13 @@ def notify_user_owner_request_status(user_email, status, reason=None):
         html_message=None,
     )
 
-    # In-App Notification
+    # In-App & Push Notification
     try:
+        from users.models import User
+        from shared.notifications import send_push_notification
+
         user = User.objects.get(email=user_email)
-        Notification.objects.create(
+        send_push_notification(
             user=user,
             title=f"Owner Request {status.capitalize()}",
             body=body_text,
@@ -227,6 +232,21 @@ def notify_owner_property_status_change(email, property_title, new_status):
         html_message=None,  # Simplified for status update, can be themed later
     )
 
+    # In-App & Push Notification
+    try:
+        from users.models import User
+        from shared.notifications import send_push_notification
+
+        user = User.objects.get(email=email)
+        send_push_notification(
+            user=user,
+            title="Property Status Update",
+            body=message,
+            data={"type": "property_status_change", "property": property_title},
+        )
+    except User.DoesNotExist:
+        pass
+
 
 # --- Monitoring & Alerts ---
 
@@ -239,6 +259,8 @@ def check_email_credits():
         limit = email_usage.get("limit", 0)
         # Alert if remaining is less than the configured threshold (e.g. 10 emails)
         if remaining < settings.RESEND_LOW_CREDIT_THRESHOLD:
+            from .tasks import send_low_credit_alert_task
+
             send_low_credit_alert_task.delay(
                 "Email (Resend)",
                 f"{remaining}/{limit}",
@@ -252,3 +274,75 @@ def alert_admin_low_credits(provider, balance, threshold):
     subject = f"CRITICAL: Low {provider} Balance"
     message = f"Your {provider} balance is currently {balance}, which is below the threshold of {threshold}."
     send_raw_email(subject, message, [settings.ADMIN_EMAIL])
+
+
+# --- Payment & Financial Notifications ---
+
+
+def notify_payment_success(transaction):
+    """Notify buyer and owner of a successful payment."""
+    from shared.notifications import send_push_notification
+    from .tasks import send_email_task
+
+    # 1. Notify Buyer (Confirmation)
+    buyer_subject = f"Payment Confirmed: {transaction.property.title}"
+    buyer_msg = f"Your payment of NGN {transaction.amount:,.2f} for '{transaction.property.title}' has been received."
+
+    send_push_notification(
+        user=transaction.payer,
+        title="Payment Successful",
+        body=buyer_msg,
+        data={"type": "payment_success", "transaction_id": transaction.id},
+    )
+    send_email_task.delay(buyer_subject, buyer_msg, [transaction.payer.email])
+
+    # 2. Notify Owner (New Sale)
+    owner_subject = f"New Sale: {transaction.property.title}"
+    owner_msg = f"You have a new sale! NGN {transaction.owner_amount:,.2f} has been added to your escrow. Funds will be available in 7 days."
+
+    send_push_notification(
+        user=transaction.owner,
+        title="New Sale Received",
+        body=owner_msg,
+        data={"type": "sale_received", "transaction_id": transaction.id},
+    )
+    send_email_task.delay(owner_subject, owner_msg, [transaction.owner.email])
+
+
+def notify_funds_released(transaction):
+    """Notify owner when escrow period ends."""
+    from shared.notifications import send_push_notification
+    from .tasks import send_email_task
+
+    subject = "Funds Available for Withdrawal"
+    msg = f"Escrow complete! NGN {transaction.owner_amount:,.2f} from the sale of '{transaction.property.title}' is now available in your wallet."
+
+    send_push_notification(
+        user=transaction.owner,
+        title="Funds Released",
+        body=msg,
+        data={"type": "funds_released", "transaction_id": transaction.id},
+    )
+    send_email_task.delay(subject, msg, [transaction.owner.email])
+
+
+def notify_withdrawal_status(withdrawal):
+    """Notify user of withdrawal processing result."""
+    from shared.notifications import send_push_notification
+    from .tasks import send_email_task
+
+    status_str = "Successful" if withdrawal.status == "PROCESSED" else "Failed"
+    subject = f"Withdrawal {status_str}"
+
+    if withdrawal.status == "PROCESSED":
+        msg = f"Your withdrawal of NGN {withdrawal.amount:,.2f} has been processed successfully."
+    else:
+        msg = f"Your withdrawal request of NGN {withdrawal.amount:,.2f} failed. {withdrawal.admin_note}"
+
+    send_push_notification(
+        user=withdrawal.user,
+        title=f"Withdrawal {status_str}",
+        body=msg,
+        data={"type": "withdrawal_update", "status": withdrawal.status},
+    )
+    send_email_task.delay(subject, msg, [withdrawal.user.email])

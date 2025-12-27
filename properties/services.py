@@ -6,8 +6,11 @@ from .models import Property, PropertyReport, Favorite, TourRequest, PropertyRev
 from shared.messaging import (
     notify_owner_property_status_change,
     check_email_credits,
+    notify_owner_property_status_change,
+    check_email_credits,
     notify_owner_new_tour_request,
 )
+from shared.notifications import send_push_notification
 
 logger = logging.getLogger(__name__)
 
@@ -119,13 +122,23 @@ class ReportingService:
             property=property_obj, user=user, reason=reason
         )
 
-        # Automatic ban logic
+        # Automatic ban logic: Reports + Cancellations >= 5
         report_count = property_obj.reports.count()
-        if report_count >= 5 and not property_obj.is_banned:
+
+        # Avoid circular import by importing locally
+        from payments.models import Cancellation
+
+        cancellation_count = Cancellation.objects.filter(
+            transaction__property=property_obj
+        ).count()
+
+        total_bad_count = report_count + cancellation_count
+
+        if total_bad_count >= 5 and not property_obj.is_banned:
             PropertyService.ban_property(
                 property_obj,
-                f"Automatically banned after {report_count} reports.",
-                user,  # In this case it's the 5th reporter who triggers it
+                f"Automatically banned after {total_bad_count} complaints (Reports + Cancellations).",
+                user,
             )
 
         return report
@@ -146,12 +159,11 @@ class ReviewService:
         property_obj.save()
 
         # Notify Owner
-        from users.models import Notification
-
-        Notification.objects.create(
+        send_push_notification(
             user=property_obj.owner,
             title="New Review",
             body=f"{user.email} reviewed your property '{property_obj.title}'.",
+            data={"property_id": property_obj.id, "review_id": review.id},
         )
 
         logger.info(f"[REVIEW] User {user.email} reviewed property {property_obj.id}")
@@ -187,6 +199,14 @@ class TourRequestService:
     def update_status(tour_request, status_value, user):
         tour_request.status = status_value
         tour_request.save()
+
+        # Notify Requester
+        send_push_notification(
+            user=tour_request.requester,
+            title="Tour Request Update",
+            body=f"Your tour request for '{tour_request.property.title}' has been {status_value}.",
+            data={"property_id": tour_request.property.id, "tour_id": tour_request.id},
+        )
 
         logger.info(
             f"[TOUR] Tour request {tour_request.id} status updated to {status_value} by {user.email}"

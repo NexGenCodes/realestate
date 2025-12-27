@@ -13,7 +13,7 @@ services:
       - .env
 
   db:
-    image: postgres:15-alpine
+    image: postgis/postgis:15-3.3-alpine
     volumes:
       - postgres_data:/var/lib/postgresql/data/
     environment:
